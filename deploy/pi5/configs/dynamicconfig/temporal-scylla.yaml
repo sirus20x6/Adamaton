@@ -1,0 +1,88 @@
+# /thearray/gogents/configs/temporal-scylla-dynamic.yaml
+# Dynamic configuration for Temporal with ScyllaDB optimizations - Gogents Project
+#
+# Callback patterns restrict where Temporal Nexus may deliver workflow callbacks.
+# Workflow-controlled URLs flowing into Nexus would be SSRF if Pattern == "*".
+# Add prod-host patterns explicitly — see component.callbacks.allowedAddresses below.
+
+# ScyllaDB Performance Optimizations
+# ScyllaDB can handle higher QPS than Cassandra
+history.persistenceMaxQPS:
+- value: 5000
+  constraints: {}
+frontend.persistenceMaxQPS:
+- value: 5000
+  constraints: {}
+
+# ScyllaDB handles concurrent operations well
+history.hostLevelCacheMaxSize:
+- value: 16384
+  constraints: {}
+
+# ScyllaDB-optimized batch settings
+history.persistenceMaxPutBatchSize:
+- value: 100
+  constraints: {}
+
+# Enable features
+system.enableEagerWorkflowStart:
+  - value: true
+frontend.workerVersioningDataAPIs:
+  - value: true
+frontend.workerVersioningWorkflowAPIs:
+  - value: true
+system.enableDeployments:
+  - value: true
+system.enableDeploymentVersions:
+  - value: true
+frontend.workerVersioningRuleAPIs:
+  - value: true
+frontend.enableExecuteMultiOperation:
+  - value: true
+system.enableNexus:
+  - value: true
+
+# Nexus callback configuration
+component.nexusoperations.callback.endpoint.template:
+  - value: http://localhost:7243/namespaces/{{.NamespaceName}}/nexus/callback
+component.callbacks.allowedAddresses:
+  - value:
+      # Loopback for dev / single-host deployments. Plain HTTP allowed since the
+      # callback never leaves the host.
+      - Pattern: "127.0.0.1:*"
+        AllowInsecure: true
+      - Pattern: "localhost:*"
+        AllowInsecure: true
+      # TODO(deploy): replace the *.gogents.internal:* placeholder with the
+      # canonical production worker hostname pattern (e.g.
+      # "worker.gogents.prod:443") before enabling Nexus in production.
+      # AllowInsecure: false forces TLS for any non-loopback callback target.
+      - Pattern: "*.gogents.internal:*"
+        AllowInsecure: false
+
+# Query optimization
+matching.queryWorkflowTaskTimeoutLogRate:
+  - value: 1.0
+
+# Replication features
+history.ReplicationEnableUpdateWithNewTaskMerge:
+  - value: true
+
+# Transition history
+history.enableTransitionHistory:
+  - value: true
+
+# ScyllaDB specific: Enable prepared statements optimization
+history.enableCassandraPreparedStatements:
+  - value: true
+    constraints: {}
+
+# ScyllaDB specific: Optimize for shard-per-core architecture
+matching.persistenceGlobalMaxQPS:
+  - value: 10000
+    constraints: {}
+
+# Throttling settings optimized for ScyllaDB
+frontend.throttledLogRPS:
+- value: 50
+  constraints: {}

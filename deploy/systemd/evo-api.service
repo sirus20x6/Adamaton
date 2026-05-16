@@ -1,0 +1,84 @@
+# /thearray/git/evo/systemd/evo-api.service
+[Unit]
+Description=GoGents API Server - Web Dashboard and REST API
+Documentation=https://github.com/thearray/git/evo
+After=network.target temporal-server.service
+Wants=temporal-server.service
+PartOf=evo.target
+
+[Service]
+Type=exec
+User=evo
+Group=evo
+WorkingDirectory=/opt/evo
+# scripts/build.sh produces bin/api (the canonical multi-binary build).
+# The Makefile's older api-server name is being phased out.
+ExecStart=/opt/evo/bin/api
+# on-failure (NOT always) keeps systemd from spinning up restart storms when
+# the binary is misconfigured — the unit logs the failure and operators can
+# fix root cause instead of watching journalctl scroll. RestartSec backs off
+# between attempts.
+Restart=on-failure
+RestartSec=5
+
+# Environment variables. PORT 9123 is the project's chosen fallback (8080 is
+# banned per CLAUDE.md as it collides with too many other dev services).
+Environment=PORT=9123
+Environment=TEMPORAL_ADDRESS=localhost:7233
+Environment=VLLM_ENDPOINT=http://localhost:8000/generate
+Environment=MCP_SERVER_URL=http://localhost:3000
+Environment=METRICS_ENABLED=true
+Environment=LOG_LEVEL=info
+
+# Resource limits
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=100
+
+# Security hardening. Existing baseline (NoNewPrivileges, PrivateTmp, Protect*)
+# is kept intact; the additions below clamp the syscall surface and address
+# families to what an HTTP API server actually needs (TCP/UNIX, no raw
+# packet, no namespace creation, no kernel-tunable writes).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# ReadWritePaths must list every directory the binary writes (logs, data, and
+# the SQLite credential/workflow/budget DBs that live under /var/lib/evo).
+# ProtectSystem=strict makes / read-only, so omitting any of these would cause
+# the binary to fail on first DB write with EROFS.
+ReadWritePaths=/opt/evo/logs /opt/evo/data /var/lib/evo /var/log/evo
+# UMask=0077 (per Stream E contract) so SQLite WAL/SHM files recreated during
+# normal operation inherit owner-only permissions — the credential and budget
+# DBs hold sensitive material and shouldn't be world-readable on disk.
+UMask=0077
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LimitNOFILE=65535
+
+# Networking
+# IPAddressDeny=any was removed: production deployments routinely require
+# non-loopback egress (Gitea, vLLM, MCP) and the cgroup BPF filter has no
+# useful failure mode (calls just hang or fail with opaque "network
+# unreachable" errors that are hard to map back to this directive). Defense
+# in-depth is provided via SystemCallFilter, ProtectSystem, NoNewPrivileges,
+# RestrictAddressFamilies, and ReadWritePaths. Operators who *do* want strict
+# egress filtering should add a drop-in at
+# /etc/systemd/system/evo-api.service.d/network.conf with the allowed
+# CIDRs explicitly listed.
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=evo-api
+
+[Install]
+WantedBy=evo.target

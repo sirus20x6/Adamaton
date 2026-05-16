@@ -1,0 +1,64 @@
+# /thearray/gogents/.golangci.yml - golangci-lint configuration for GoGents
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # Baseline (Pass 11)
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - gosec
+    - bodyclose
+    - contextcheck
+    - revive
+    # Pass 12 additions: each one earns its slot.
+    - errorlint     # catches errors.Is/As misuse and direct == comparisons
+    - gocritic      # opinionated bug/perf checks
+    - unparam       # flags always-the-same return values and unused params
+    - nilerr        # `if err != nil { return nil }` — almost always a bug
+    - prealloc      # nudges loops toward make([]T, 0, n) when length is known
+    - unconvert     # removes redundant type conversions
+    - wastedassign  # value assigned but never read before reassignment
+    - noctx         # net/http calls without a context.Context
+    - bidichk       # rejects bidi-control unicode (CVE-2021-42574)
+
+linters-settings:
+  govet:
+    enable:
+      # govet's shadow analyzer is opt-in; enable it explicitly so things
+      # like `if err := f(); err != nil { ... }` followed by an outer-scope
+      # `err` shadow get flagged before they bite.
+      - shadow
+  gosec:
+    excludes:
+      - G404  # math/rand for jitter is fine
+      - G304  # filepath.Join with user input — we validate
+
+issues:
+  exclude-rules:
+    # Test files frequently call APIs whose return-value-checks would just
+    # noise the file (e.g. `defer s.Close()`). Keep the broad exclusion for
+    # errcheck and gosec; do NOT widen it to the new linters — errorlint and
+    # nilerr findings in tests are usually real bugs.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    # In tests, http.HandlerFunc(func(w, r) {...}) signatures are natural even
+    # when r isn't read; renaming r to _ everywhere harms readability.
+    - path: _test\.go
+      text: "unused-parameter"
+      linters:
+        - revive
+    # gocritic's `commentFormatting` and `ifElseChain` are noisy and
+    # subjective; suppress those specific checks rather than disable the
+    # whole linter. New rules can be added here as they prove themselves.
+    - linters:
+        - gocritic
+      text: "(commentFormatting|ifElseChain)"

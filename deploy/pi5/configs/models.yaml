@@ -1,0 +1,45 @@
+# /thearray/gogents/configs/models.yaml - Model configuration for AI-driven PR review
+#
+# ASPIRATIONAL: this file is NOT consumed at runtime. The agent registry is
+# in internal/types/types.go and config in internal/config/config.go. Update
+# or delete this file based on whether it serves as design documentation.
+# Model IDs below reference 2024-era names (claude-3-5-sonnet-20241022,
+# o1-preview) and have not been kept current.
+#
+# NOTE: Viper does NOT expand shell-style ${VAR} placeholders inside YAML
+# values. Provide API keys via environment variables (OPENAI_API_KEY,
+# ANTHROPIC_API_KEY, GROQ_API_KEY) — they are read at runtime by the LLM
+# client, not by the config loader. The api_key field below is intentionally
+# left blank.
+models:
+  fast:
+    name: "gpt-4o-mini"
+    provider: "openai"
+    api_key: ""   # set OPENAI_API_KEY in environment
+    parameters:
+      temperature: 0.1
+      max_tokens: 1000
+
+  main:
+    name: "claude-3-5-sonnet-20241022"
+    provider: "anthropic"
+    api_key: ""   # set ANTHROPIC_API_KEY in environment
+    parameters:
+      temperature: 0.0
+      max_tokens: 2000
+
+  powerful:
+    name: "o1-preview"
+    provider: "openai"
+    api_key: ""   # set OPENAI_API_KEY in environment
+    parameters:
+      temperature: 1.0
+      max_tokens: 4000
+
+  cheap:
+    name: "llama-3.1-8b-instant"
+    provider: "groq"
+    api_key: ""   # set GROQ_API_KEY in environment
+    parameters:
+      temperature: 0.2
+      max_tokens: 500

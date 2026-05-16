@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepresearch-sidecar"
+version = "0.1.0"
+description = "BGE-M3 + BGE-Reranker-v2-m3 sidecar exposing OpenAI-compatible /v1/embeddings and a custom /v1/rerank."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "deepresearch" }]
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.10",
+    "torch>=2.4",
+    "transformers>=4.45",
+    "sentence-transformers>=3.1",
+    "huggingface_hub>=0.25",
+    "numpy>=1.26",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

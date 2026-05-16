@@ -1,0 +1,144 @@
+# /thearray/gogents/configs/agents.yaml - Agent configuration for AI-driven PR review
+#
+# ASPIRATIONAL: this file is NOT consumed at runtime. The agent registry is
+# in internal/types/types.go and config in internal/config/config.go. The
+# `model:` / `fallback_model:` references (fast/main/cheap/powerful) below
+# point at configs/models.yaml which is also not loaded by the agent loader.
+# Update or delete this file based on whether it serves as design
+# documentation.
+#
+# Runtime config of the 12 review agents lives in:
+#   - internal/types/types.go      (the AgentType constants + struct)
+#   - internal/config/config.go    (DefaultConfig + validateAgentConfigs)
+#   - GOGENTS_AGENTS_<NAME>_*      (env-var overrides)
+agents:
+  security:
+    model: "main"            # Use Claude for security analysis
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000
+      focus_patterns:
+        - "auth*"
+        - "*security*"
+        - "*crypto*"
+        - "*sql*"
+    prompts:
+      system: |
+        You are a security expert analyzing code changes for potential vulnerabilities.
+        Focus on: SQL injection, XSS, authentication bypasses, crypto misuse, etc.
+        Consider the broader codebase context provided.
+
+  performance:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 4000
+      focus_patterns:
+        - "*db*"
+        - "*query*"
+        - "*cache*"
+        - "*loop*"
+
+  const:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1000
+    repository_context:
+      enabled: false
+
+  style:
+    model: "cheap"
+    fallback_model: "fast"
+    max_tokens: 500
+    tools:
+      - "golangci-lint"
+      - "gofmt"
+      - "go vet"
+
+  documentation:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1000
+    repository_context:
+      enabled: false
+
+  dependencies:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1000
+    repository_context:
+      enabled: true
+      max_context_tokens: 2000
+      focus_patterns:
+        - "go.mod"
+        - "go.sum"
+        - "package.json"
+        - "package-lock.json"
+        - "Cargo.toml"
+        - "requirements*.txt"
+
+  maintainability:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 4000
+
+  testing:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 4000
+      focus_patterns:
+        - "*_test.go"
+        - "test/**"
+        - "tests/**"
+        - "*.test.ts"
+        - "*.test.tsx"
+        - "*.spec.ts"
+        - "*.spec.tsx"
+
+  business_logic:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000
+
+  accessibility:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1000
+    repository_context:
+      enabled: true
+      max_context_tokens: 2000
+      focus_patterns:
+        - "*.html"
+        - "*.tsx"
+        - "*.jsx"
+        - "*.vue"
+        - "*.svelte"
+
+  compliance:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 4000
+
+  architecture:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000

@@ -1,0 +1,20 @@
+[Unit]
+Description=Container crashloop guard (one-shot poll)
+Documentation=https://github.com/sirus20x6/evo
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/crashloop-guard
+# Tunables -- override in /etc/systemd/system/crashloop-guard.service.d/*.conf
+# Environment=THRESHOLD=5
+# Environment=WINDOW_SECONDS=120
+# Environment=DRY_RUN=1
+
+# Logs to journald via systemd capture of stdout.
+StandardOutput=journal
+StandardError=journal
+
+# Defensive: cap runtime in case docker is wedged.
+TimeoutStartSec=60

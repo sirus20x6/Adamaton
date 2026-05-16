@@ -1,0 +1,42 @@
+# /thearray/gogents/configs/temporal.yaml - ScyllaDB Configuration
+persistence:
+  defaultStore: scylla-default
+  visibilityStore: scylla-default
+  numHistoryShards: 4
+  datastores:
+    scylla-default:
+      cassandra:
+        hosts: "127.0.0.1"
+        port: 9042
+        keyspace: "temporal"
+        maxConns: 20
+        disableInitialHostLookup: false
+        connectTimeout: "30s"
+
+services:
+  frontend:
+    rpc:
+      port: 7233
+      bindOnLocalHost: true
+  history:
+    rpc:
+      port: 7234
+      bindOnLocalHost: true
+  matching:
+    rpc:
+      port: 7235
+      bindOnLocalHost: true
+  worker:
+    rpc:
+      port: 7236
+      bindOnLocalHost: true
+
+global:
+  membership:
+    maxJoinDuration: 30s
+  pprof:
+    port: 7936
+
+log:
+  stdout: true
+  level: info

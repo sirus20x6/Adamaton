@@ -1,0 +1,235 @@
+# /thearray/gogents/configs/vsmarkdownincludes.yaml - Specialized configuration for VSMarkdownIncludes project
+agents:
+  documentation:
+    model: "main"  # Use Claude for documentation analysis
+    fallback_model: "fast"
+    max_tokens: 2500
+    repository_context:
+      enabled: true
+      max_context_tokens: 10000
+      focus_patterns:
+        - "*.md"
+        - "*.txt"
+        - "README*"
+        - "docs/*"
+        - "*.json"
+        - "*.js"
+        - "*.ts"
+    prompts:
+      system: |
+        You are a documentation expert analyzing changes to VSMarkdownIncludes, a VS Code extension.
+        Focus on: markdown syntax, documentation clarity, README completeness, API documentation,
+        user experience, and extension functionality. Ensure documentation matches code behavior.
+      
+  security:
+    model: "main"  # Use Claude for security analysis
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000
+      focus_patterns:
+        - "*.js"
+        - "*.ts"
+        - "*.json"
+        - "package*.json"
+        - "*security*"
+        - "*auth*"
+    prompts:
+      system: |
+        You are a security expert analyzing a VS Code extension for vulnerabilities.
+        Focus on: XSS in markdown rendering, unsafe file operations, command injection,
+        dependency vulnerabilities, and VS Code API misuse. Consider extension marketplace security.
+      
+  performance:
+    model: "fast"  # Use fast model for performance
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 6000
+      focus_patterns:
+        - "*.js"
+        - "*.ts"
+        - "*performance*"
+        - "*cache*"
+        - "*memory*"
+    prompts:
+      system: |
+        You are a performance expert analyzing VS Code extension code.
+        Focus on: file I/O efficiency, markdown parsing performance, memory usage,
+        VS Code API efficiency, and extension startup time.
+    
+  accessibility:
+    model: "main"  # Important for VS Code extensions
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 6000
+      focus_patterns:
+        - "*.md"
+        - "*.html"
+        - "*.css"
+        - "*.js"
+        - "*.ts"
+    prompts:
+      system: |
+        You are an accessibility expert analyzing VS Code extension features.
+        Focus on: screen reader compatibility, keyboard navigation, color contrast,
+        accessible markdown output, and VS Code accessibility guidelines.
+    
+  testing:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 5000
+      focus_patterns:
+        - "*test*"
+        - "*spec*"
+        - "*.test.js"
+        - "*.test.ts"
+    prompts:
+      system: |
+        You are a testing expert analyzing VS Code extension test coverage.
+        Focus on: unit tests for markdown processing, integration tests for VS Code API,
+        edge cases in file inclusion, and user workflow testing.
+    
+  # Renamed const_correctness -> const (Pass 5+) to match the agent key in
+  # internal/config/config.go's validateAgentConfigs.
+  const:
+    model: "fast"  # Not applicable to JS/TS, but can check immutability
+    fallback_model: "main"
+    max_tokens: 1000
+    repository_context:
+      enabled: false
+    prompts:
+      system: |
+        You are analyzing JavaScript/TypeScript code for immutability and const usage.
+        Focus on: proper const vs let usage, immutable data patterns,
+        and functional programming practices.
+
+  # Renamed linting -> style (Pass 5+) to match the agent key in
+  # internal/config/config.go's validateAgentConfigs.
+  style:
+    model: "cheap"
+    fallback_model: "fast"
+    max_tokens: 500
+    tools:
+      - "eslint"
+      - "prettier"
+      - "tsc"
+    prompts:
+      system: |
+        You are analyzing code formatting and basic linting issues.
+        Focus on: JavaScript/TypeScript syntax, formatting consistency,
+        and basic code quality issues.
+
+  architecture:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000
+      focus_patterns:
+        - "*.js"
+        - "*.ts"
+        - "*.json"
+        - "src/*"
+    prompts:
+      system: |
+        You are an architecture expert analyzing VS Code extension design.
+        Focus on: extension structure, VS Code API usage patterns, module organization,
+        separation of concerns, and maintainable code architecture.
+
+  dependencies:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 4000
+      focus_patterns:
+        - "package*.json"
+        - "*.lock"
+        - "node_modules/*"
+    prompts:
+      system: |
+        You are analyzing dependencies and supply chain security for a VS Code extension.
+        Focus on: outdated packages, security vulnerabilities, license compatibility,
+        and unnecessary dependencies.
+
+  business_logic:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 2000
+    repository_context:
+      enabled: true
+      max_context_tokens: 8000
+      focus_patterns:
+        - "*.js"
+        - "*.ts"
+        - "README*"
+        - "*.md"
+    prompts:
+      system: |
+        You are analyzing the core functionality of VSMarkdownIncludes extension.
+        Focus on: markdown file inclusion logic, path resolution, error handling,
+        user experience, and feature completeness according to requirements.
+
+  maintainability:
+    model: "fast"
+    fallback_model: "main"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 6000
+      focus_patterns:
+        - "*.js"
+        - "*.ts"
+        - "*.md"
+    prompts:
+      system: |
+        You are analyzing code maintainability for a VS Code extension.
+        Focus on: code complexity, readability, documentation quality,
+        refactoring opportunities, and long-term maintenance concerns.
+
+  compliance:
+    model: "main"
+    fallback_model: "fast"
+    max_tokens: 1500
+    repository_context:
+      enabled: true
+      max_context_tokens: 5000
+      focus_patterns:
+        - "LICENSE*"
+        - "*.md"
+        - "package*.json"
+    prompts:
+      system: |
+        You are analyzing compliance and licensing for a VS Code extension.
+        Focus on: open source license compliance, VS Code marketplace requirements,
+        privacy considerations, and attribution requirements.
+
+# Project-specific settings for VSMarkdownIncludes
+project:
+  name: "VSMarkdownIncludes"
+  type: "vscode-extension"
+  primary_languages: ["javascript", "typescript", "markdown"]
+  focus_areas: ["documentation", "markdown-processing", "file-operations"]
+  
+  # Special handling for markdown files
+  markdown_specific:
+    validate_syntax: true
+    check_links: true
+    verify_includes: true
+    
+  # VS Code extension specific checks
+  vscode_extension:
+    check_manifest: true
+    validate_api_usage: true
+    verify_commands: true
+    check_contributions: true
