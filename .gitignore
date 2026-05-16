@@ -1,0 +1,26 @@
+# Adamomaton umbrella .gitignore.
+#
+# Worktrees (umbrella-level + per-submodule) are local-only.
+# .locks/*.json are tracked (concurrent claims need to be visible);
+# only the .gitkeep is the placeholder.
+
+/worktrees/
+/**/*-worktrees/
+
+# Local agent state
+/.locks/*.json
+
+# Per-component build artefacts that escape into the umbrella checkout
+/bin/*.local
+/bin/*.arm64
+/bin/*.amd64
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Go build cache when a stray go build lands here
+/go.sum

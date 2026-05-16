@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Adamomaton commit-msg hook. Installed by `bin/adam sync-hooks`.
+#
+# Enforces:
+#   1. No `Co-Authored-By:` trailers.
+#   2. No `@username` mentions in the message body (forks propagate
+#      the mention forever, pinging the user every time someone touches
+#      the commit downstream).
+#   3. No literal `claude.ai` or `noreply@anthropic.com` in the message.
+
+set -euo pipefail
+
+msg_file="$1"
+
+# Strip lines starting with '#' (git's comment lines), then check.
+content="$(grep -v '^#' "$msg_file")"
+
+if echo "$content" | grep -qiE "^Co-Authored-By:" ; then
+    printf "\033[31m" >&2
+    echo "adam commit-msg: blocked — message contains a 'Co-Authored-By:' trailer." >&2
+    printf "\033[0m" >&2
+    echo "                 Use the PR description for collaboration credit; trailers propagate forever." >&2
+    exit 1
+fi
+
+if echo "$content" | grep -qiE "(claude\.ai|noreply@anthropic\.com)"; then
+    printf "\033[31m" >&2
+    echo "adam commit-msg: blocked — message contains 'claude.ai' or 'noreply@anthropic.com'." >&2
+    printf "\033[0m" >&2
+    exit 1
+fi
+
+# @-mentions: a leading-or-internal "@word" not inside an email address.
+# Heuristic: any line where @[A-Za-z0-9_-]+ appears without an
+# immediately-preceding word character (to skip user@host emails).
+if echo "$content" | grep -qE '(^|[^A-Za-z0-9._-])@[A-Za-z0-9][A-Za-z0-9_-]+'; then
+    printf "\033[31m" >&2
+    echo "adam commit-msg: blocked — message body has an @mention." >&2
+    printf "\033[0m" >&2
+    echo "                 Forks propagate mentions forever, pinging the user every time someone touches the commit." >&2
+    echo "                 If you need to credit someone, use the PR description." >&2
+    exit 1
+fi

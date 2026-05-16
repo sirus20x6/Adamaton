@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# adam — Adamomaton agent-coordination CLI.
+#
+# Subcommands:
+#   claim <scope>/<task>      create a worktree + branch + lockfile
+#   release <scope>/<task>    push branch (optional), remove worktree, drop lockfile
+#   status [--conflicts]      list active claims (and overlapping path warnings)
+#   sync-hooks                install hooks/ templates into every submodule
+#   deploy <host>             run deploy/<host>/up.sh
+#   bump <sub-repo>           advance umbrella's submodule pin to its origin/main HEAD
+#   pin <sub-repo>            show current umbrella pin for a sub-repo
+#   pull                      git pull + git submodule update --recursive --remote
+#   help [subcommand]
+#
+# Soft coordination: lockfiles in .locks/ describe active work but don't
+# physically prevent overlap. The pre-push hook warns when pushing to a
+# branch claimed by someone else; you can `--force` past it.
+
+set -euo pipefail
+
+# ---- globals -------------------------------------------------------------
+
+# When invoked as $REPO/bin/adam, ADAM_ROOT is the umbrella root.
+ADAM_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LOCK_DIR="$ADAM_ROOT/.locks"
+HOOKS_DIR="$ADAM_ROOT/hooks"
+DEPLOY_DIR="$ADAM_ROOT/deploy"
+
+CURRENT_AGENT="${ADAM_AGENT:-$(git config user.name 2>/dev/null || whoami)}"
+
+# Submodule names recognised as <scope>. "cross" is a special scope that
+# means "umbrella-level worktree containing all submodules".
+SUBMODULES=(core frontend knowledge deepresearch platform delegator evolve)
+
+# ---- helpers -------------------------------------------------------------
+
+usage() {
+    cat <<'EOF'
+Usage: adam <subcommand> [args]
+
+Subcommands:
+  claim <scope>/<task>      create a worktree + branch + lockfile
+                            <scope> = one of core|frontend|knowledge|deepresearch|
+                                      platform|delegator|evolve|cross
+  release <scope>/<task>    remove the worktree, drop the lockfile
+                            (use --keep-branch to leave the branch unpushed)
+  status [--conflicts]      list active claims (--conflicts: show overlapping paths)
+  sync-hooks                copy hooks/ templates into each submodule's .git/hooks/
+  deploy <host>             run deploy/<host>/up.sh
+                            <host> = pi5 | pi5-speaker | blackwell | workstation
+  bump <sub-repo>           advance the umbrella's pin to that submodule's origin/main HEAD
+  pin <sub-repo>            print the current umbrella SHA pin
+  pull                      umbrella pull + recursive submodule update
+  help [subcommand]
+EOF
+}
+
+die() { echo "adam: error: $*" >&2; exit 2; }
+
+# Normalize a scope/task string into ($scope $task). Aborts on bad shape.
+parse_scope_task() {
+    local arg="$1"
+    if [[ "$arg" != */* ]]; then
+        die "expected <scope>/<task>, got '$arg'"
+    fi
+    SCOPE="${arg%%/*}"
+    TASK="${arg#*/}"
+    if [[ -z "$SCOPE" || -z "$TASK" ]]; then
+        die "scope and task must both be non-empty"
+    fi
+    # Sanity-check scope.
+    local ok=0
+    for s in "${SUBMODULES[@]}" cross; do
+        if [[ "$s" == "$SCOPE" ]]; then ok=1; break; fi
+    done
+    if [[ "$ok" -ne 1 ]]; then
+        die "unknown scope '$SCOPE'; valid: ${SUBMODULES[*]} cross"
+    fi
+}
+
+lock_path() {
+    echo "$LOCK_DIR/$1-$2.json"
+}
+
+write_lock() {
+    local scope="$1" task="$2" branch="$3" worktree="$4" paths="$5"
+    local now
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    cat > "$(lock_path "$scope" "$task")" <<EOF
+{
+  "agent":     "$CURRENT_AGENT",
+  "scope":     "$scope",
+  "task":      "$task",
+  "branch":    "$branch",
+  "worktree":  "$worktree",
+  "paths":     [$paths],
+  "started_at":"$now"
+}
+EOF
+}
+
+git_in() { git -C "$1" "${@:2}"; }
+
+# ---- subcommands ---------------------------------------------------------
+
+cmd_claim() {
+    [[ $# -ge 1 ]] || die "claim: missing <scope>/<task>"
+    parse_scope_task "$1"
+    shift
+    # Optional --paths "glob1,glob2,..."
+    local paths_csv=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --paths) paths_csv="$2"; shift 2 ;;
+            *) die "unknown flag '$1'" ;;
+        esac
+    done
+    local paths_json=""
+    if [[ -n "$paths_csv" ]]; then
+        IFS=',' read -ra arr <<<"$paths_csv"
+        for p in "${arr[@]}"; do
+            paths_json+="\"$p\","
+        done
+        paths_json="${paths_json%,}"
+    fi
+
+    local lock_file
+    lock_file="$(lock_path "$SCOPE" "$TASK")"
+    if [[ -e "$lock_file" ]]; then
+        die "claim already exists at $lock_file (use 'release' first, or --force)"
+    fi
+
+    local branch="$CURRENT_AGENT/$TASK"
+    local worktree_path
+    if [[ "$SCOPE" == "cross" ]]; then
+        worktree_path="$ADAM_ROOT/worktrees/$CURRENT_AGENT-$TASK"
+        git_in "$ADAM_ROOT" fetch
+        git_in "$ADAM_ROOT" worktree add "$worktree_path" -b "$branch"
+        git_in "$worktree_path" submodule update --init --recursive
+    else
+        local sub_repo="$ADAM_ROOT/$SCOPE"
+        worktree_path="$sub_repo/$SCOPE-worktrees/$CURRENT_AGENT-$TASK"
+        git_in "$sub_repo" fetch
+        git_in "$sub_repo" worktree add "$worktree_path" -b "$branch" origin/main
+    fi
+
+    write_lock "$SCOPE" "$TASK" "$branch" "$worktree_path" "$paths_json"
+
+    echo "claimed: $SCOPE/$TASK"
+    echo "  agent:    $CURRENT_AGENT"
+    echo "  branch:   $branch"
+    echo "  worktree: $worktree_path"
+    echo "  cd $worktree_path"
+}
+
+cmd_release() {
+    [[ $# -ge 1 ]] || die "release: missing <scope>/<task>"
+    parse_scope_task "$1"
+    shift
+    local keep_branch=0
+    local force=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --keep-branch) keep_branch=1; shift ;;
+            --force) force=1; shift ;;
+            *) die "unknown flag '$1'" ;;
+        esac
+    done
+    local lock_file
+    lock_file="$(lock_path "$SCOPE" "$TASK")"
+    [[ -e "$lock_file" ]] || die "no lockfile at $lock_file"
+
+    local worktree branch
+    worktree="$(grep -E '"worktree"' "$lock_file" | sed -E 's/.*"worktree" *: *"([^"]+)".*/\1/')"
+    branch="$(grep -E '"branch"' "$lock_file" | sed -E 's/.*"branch" *: *"([^"]+)".*/\1/')"
+
+    # Check for dirty changes.
+    if [[ -d "$worktree" ]]; then
+        if ! git_in "$worktree" diff --quiet || ! git_in "$worktree" diff --cached --quiet; then
+            if [[ "$force" -ne 1 ]]; then
+                die "worktree $worktree has uncommitted changes (use --force to discard)"
+            fi
+        fi
+    fi
+
+    # Remove the worktree.
+    if [[ "$SCOPE" == "cross" ]]; then
+        git_in "$ADAM_ROOT" worktree remove "$worktree" ${force:+--force}
+    elif [[ -d "$worktree" ]]; then
+        git_in "$ADAM_ROOT/$SCOPE" worktree remove "$worktree" ${force:+--force}
+    fi
+
+    # Delete branch unless asked to keep.
+    if [[ "$keep_branch" -ne 1 ]]; then
+        local repo
+        if [[ "$SCOPE" == "cross" ]]; then repo="$ADAM_ROOT"; else repo="$ADAM_ROOT/$SCOPE"; fi
+        # The branch may have already been pushed + merged; --delete will
+        # only refuse if it's not merged. Use -D when --force.
+        if [[ "$force" -eq 1 ]]; then
+            git_in "$repo" branch -D "$branch" 2>/dev/null || true
+        else
+            git_in "$repo" branch --delete "$branch" 2>/dev/null || \
+                echo "adam: branch $branch not deleted (not merged?); pass --force to drop anyway"
+        fi
+    fi
+
+    rm "$lock_file"
+    echo "released: $SCOPE/$TASK"
+}
+
+cmd_status() {
+    local show_conflicts=0
+    [[ "${1:-}" == "--conflicts" ]] && show_conflicts=1
+    shopt -s nullglob
+    local locks=("$LOCK_DIR"/*.json)
+    shopt -u nullglob
+    if [[ ${#locks[@]} -eq 0 ]]; then
+        echo "no active claims"
+        return 0
+    fi
+    printf "%-12s %-20s %-30s %s\n" "AGENT" "SCOPE/TASK" "BRANCH" "STARTED"
+    for f in "${locks[@]}"; do
+        local agent scope task branch started
+        agent="$(grep -E '"agent"' "$f" | sed -E 's/.*"agent" *: *"([^"]+)".*/\1/')"
+        scope="$(grep -E '"scope"' "$f" | sed -E 's/.*"scope" *: *"([^"]+)".*/\1/')"
+        task="$(grep -E '"task"' "$f" | sed -E 's/.*"task" *: *"([^"]+)".*/\1/')"
+        branch="$(grep -E '"branch"' "$f" | sed -E 's/.*"branch" *: *"([^"]+)".*/\1/')"
+        started="$(grep -E '"started_at"' "$f" | sed -E 's/.*"started_at" *: *"([^"]+)".*/\1/')"
+        printf "%-12s %-20s %-30s %s\n" "$agent" "$scope/$task" "$branch" "$started"
+    done
+
+    if [[ "$show_conflicts" -eq 1 ]]; then
+        echo
+        echo "(path-overlap detection not implemented yet — Phase 5 follow-up)"
+    fi
+}
+
+cmd_sync_hooks() {
+    [[ -d "$HOOKS_DIR" ]] || die "no $HOOKS_DIR — was the umbrella bootstrapped correctly?"
+    local installed=0
+    # Umbrella's own hooks.
+    install_hooks_into "$ADAM_ROOT"
+    installed=$((installed + 1))
+    # Each submodule's hooks (path is .git file -> ../.git/modules/<sub>/).
+    for sub in "${SUBMODULES[@]}"; do
+        [[ -e "$ADAM_ROOT/$sub/.git" ]] || continue
+        install_hooks_into "$ADAM_ROOT/$sub"
+        installed=$((installed + 1))
+    done
+    echo "synced hooks into $installed checkouts"
+}
+
+install_hooks_into() {
+    local dir="$1"
+    # Resolve the actual git-dir (in submodules, .git is a file pointing
+    # at ../.git/modules/<sub>/).
+    local gitdir
+    gitdir="$(git -C "$dir" rev-parse --git-dir)"
+    if [[ "$gitdir" != /* ]]; then
+        gitdir="$dir/$gitdir"
+    fi
+    mkdir -p "$gitdir/hooks"
+    for h in pre-commit pre-push commit-msg; do
+        [[ -f "$HOOKS_DIR/$h" ]] || continue
+        cp "$HOOKS_DIR/$h" "$gitdir/hooks/$h"
+        chmod +x "$gitdir/hooks/$h"
+    done
+}
+
+cmd_deploy() {
+    [[ $# -ge 1 ]] || die "deploy: missing <host>"
+    local host="$1"
+    local up="$DEPLOY_DIR/$host/up.sh"
+    [[ -x "$up" ]] || die "no executable $up"
+    exec "$up"
+}
+
+cmd_bump() {
+    [[ $# -ge 1 ]] || die "bump: missing <sub-repo>"
+    local sub="$1"
+    [[ -d "$ADAM_ROOT/$sub" ]] || die "no submodule '$sub' in umbrella"
+    git_in "$ADAM_ROOT/$sub" fetch origin main
+    git_in "$ADAM_ROOT/$sub" checkout origin/main
+    local new_sha
+    new_sha="$(git_in "$ADAM_ROOT/$sub" rev-parse HEAD)"
+    git_in "$ADAM_ROOT" add "$sub"
+    git_in "$ADAM_ROOT" commit -m "bump $sub to $new_sha" || \
+        echo "adam: no pin change for $sub (already at $new_sha)"
+}
+
+cmd_pin() {
+    [[ $# -ge 1 ]] || die "pin: missing <sub-repo>"
+    local sub="$1"
+    git_in "$ADAM_ROOT" ls-tree HEAD "$sub" | awk '{print $3}'
+}
+
+cmd_pull() {
+    git_in "$ADAM_ROOT" pull
+    git_in "$ADAM_ROOT" submodule update --recursive --remote
+}
+
+# ---- dispatch ------------------------------------------------------------
+
+if [[ $# -eq 0 ]]; then usage; exit 0; fi
+
+case "$1" in
+    claim)      shift; cmd_claim "$@" ;;
+    release)    shift; cmd_release "$@" ;;
+    status)     shift; cmd_status "$@" ;;
+    sync-hooks) shift; cmd_sync_hooks "$@" ;;
+    deploy)     shift; cmd_deploy "$@" ;;
+    bump)       shift; cmd_bump "$@" ;;
+    pin)        shift; cmd_pin "$@" ;;
+    pull)       shift; cmd_pull "$@" ;;
+    help|-h|--help) usage ;;
+    *) die "unknown subcommand '$1'; try 'adam help'" ;;
+esac
