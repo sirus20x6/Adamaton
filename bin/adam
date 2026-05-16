@@ -659,6 +659,23 @@ host_https_alias() {
     echo "${!key:-${h}.local}"
 }
 
+# host_deploy_url <host>: base URL for the deploy-agent (no trailing
+# slash). Defaults to http://<ssh_alias>:9128 because not every host
+# runs Caddy (pi5-speaker doesn't), and the bearer token is already
+# the security boundary -- TLS adds no auth value over LAN-internal
+# HTTP. Override with HOST_DEPLOY_URL_<UPPER> in ship.env when a host
+# fronts the agent through HTTPS.
+host_deploy_url() {
+    local h="$1" key target
+    key="HOST_DEPLOY_URL_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    if [[ -n "${!key:-}" ]]; then
+        echo "${!key}"
+        return
+    fi
+    target=$(host_ssh_alias "$h")
+    echo "http://${target}:9128"
+}
+
 # service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
 # sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
 # the source (used for SHA tag + dirty check). image_name is the registry
@@ -725,12 +742,12 @@ cmd_ship() {
         fi
 
         # Caddy on the Pi terminates TLS with a self-signed/local cert that
-        # the workstation may not have in its trust store, so use --insecure.
+        # the workstation may not have in its trust store, so use.
         # The bearer token still authenticates the request inside the agent.
-        local restart_url="https://$(host_https_alias "$host")/deploy/restart?service=${svc}&tag=${tag}"
+        local restart_url="$(host_deploy_url "$host")/restart?service=${svc}&tag=${tag}"
         echo "    POST $restart_url"
         local resp
-        if ! resp="$(curl -fsS --insecure \
+        if ! resp="$(curl -fsS \
                 -X POST \
                 -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
                 "$restart_url" 2>&1)"; then
@@ -738,12 +755,12 @@ cmd_ship() {
         fi
 
         # Poll /deploy/status until the new tag appears (or 60s elapse).
-        local status_url="https://$(host_https_alias "$host")/deploy/status?service=${svc}"
+        local status_url="$(host_deploy_url "$host")/status?service=${svc}"
         local waited=0 ok=0
         while (( waited < 60 )); do
             sleep 5
             waited=$((waited + 5))
-            status="$(curl -fsS --insecure \
+            status="$(curl -fsS \
                 -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
                 "$status_url" 2>/dev/null || true)"
             if [[ "$status" == *"$tag"* ]]; then
@@ -796,12 +813,12 @@ cmd_ship_self() {
         die "ssh-driven restart of deploy-agent on $ssh_target failed"
     fi
 
-    # Give the agent a moment to come back, then poll /deploy/health.
+    # Give the agent a moment to come back, then poll /health.
     sleep 5
-    local health_url="https://${https_target}/deploy/health"
+    local health_url="$(host_deploy_url "$host")/health"
     local waited=0 ok=0
     while (( waited < 30 )); do
-        if curl -fsS --insecure --max-time 3 "$health_url" >/dev/null 2>&1; then
+        if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
             ok=1
             break
         fi
@@ -965,10 +982,10 @@ EOF_DAEMON
         die "docker compose up -d deploy-agent on $host_alias failed"
     fi
     sleep 5
-    local health_url="https://${https_target}/deploy/health"
+    local health_url="$(host_deploy_url "$host")/health"
     local waited=0 ok=0
     while (( waited < 30 )); do
-        if curl -fsS --insecure --max-time 3 "$health_url" >/dev/null 2>&1; then
+        if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
             ok=1
             break
         fi
