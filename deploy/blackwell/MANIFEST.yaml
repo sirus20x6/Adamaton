@@ -10,3 +10,4 @@ image_tag: "main"
 services:
   - evo-worker          # KernelBench candidate evaluator on CUDA
   - distill-trainer     # DPO+LoRA trainer (gated behind --profile=train)
+  - deploy-agent        # push-deploy receiver
