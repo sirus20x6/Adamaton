@@ -283,6 +283,13 @@ install_hooks_into() {
         cp "$HOOKS_DIR/$h" "$gitdir/hooks/$h"
         chmod +x "$gitdir/hooks/$h"
     done
+    # Override any global core.hooksPath that would otherwise hide our
+    # installed hooks. Users commonly set core.hooksPath in ~/.config/git
+    # for their own dotfiles; without this local override our hooks would
+    # never run (and the branch-enforcement guard would be silently
+    # disabled). Submodule hooks live under the umbrella's
+    # .git/modules/<sub>/hooks — point there explicitly.
+    git -C "$dir" config core.hooksPath "$gitdir/hooks"
 }
 
 cmd_deploy() {
