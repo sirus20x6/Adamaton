@@ -431,6 +431,11 @@ services:
     # bundle is built on the workstation and rsynced to ./frontend-dist/
     # by up.sh; we bind-mount it read-only into the caddy container.
     image: caddy:2-alpine
+    # env_file is required so the Caddyfile's {env.EVO_API_TOKEN}
+    # placeholder substitutes correctly at boot. Without it the SPA hits
+    # /evo-api/* with an empty Bearer header and evo-api 401s every
+    # request ("5 data sources unreachable" UI symptom).
+    env_file: [.env]
     volumes:
       - ./frontend-dist:/srv/frontend:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
