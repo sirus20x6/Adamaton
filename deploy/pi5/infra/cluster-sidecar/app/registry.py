@@ -26,12 +26,74 @@ import logging
 import os
 import platform
 import socket
-from typing import Optional
+import subprocess
+from typing import Optional, Tuple
 
 import asyncpg
 import psutil
 
 log = logging.getLogger("cluster-sidecar.registry")
+
+
+def _detect_nvidia_gpu() -> Tuple[str, int, int, str]:
+    """Probe nvidia-smi for GPU info. Returns ``(model, count, vram_gb, driver)``.
+
+    Returns ``("", 0, 0, "")`` on any failure (binary missing, no GPU,
+    parse error, timeout). Mirrors ``core/workerregistry/detect.go``
+    so the cluster-sidecar reports the same shape as Go workers.
+
+    The container must run with ``--gpus all`` (or compose
+    ``deploy.resources.reservations.devices``) and at least the
+    ``utility`` driver capability for nvidia-smi to be present.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,driver_version,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+        log.debug("nvidia-smi not available: %s", exc)
+        return "", 0, 0, ""
+
+    if result.returncode != 0:
+        log.debug("nvidia-smi returned %d: %s", result.returncode, result.stderr.strip())
+        return "", 0, 0, ""
+
+    rows = [r for r in (line.strip() for line in result.stdout.splitlines()) if r]
+    if not rows:
+        return "", 0, 0, ""
+
+    model = ""
+    driver = ""
+    count = 0
+    # Min-VRAM across cards (heterogeneous fleets: dispatch must match the
+    # guaranteed-available card, not the largest).
+    min_vram_mb = 0
+    for i, row in enumerate(rows):
+        fields = [f.strip() for f in row.split(",")]
+        if len(fields) < 3:
+            continue
+        name, drv, mem_str = fields[0], fields[1], fields[2]
+        if i == 0:
+            model = name
+            driver = drv
+        count += 1
+        try:
+            mb = int(mem_str)
+        except ValueError:
+            continue
+        if mb > 0 and (min_vram_mb == 0 or mb < min_vram_mb):
+            min_vram_mb = mb
+
+    vram_gb = round(min_vram_mb / 1024) if min_vram_mb > 0 else 0
+    return model, count, vram_gb, driver
 
 
 _UPSERT_SQL = """
@@ -153,6 +215,11 @@ class WorkerRegistration:
         ram_gb_value = int(round(psutil.virtual_memory().total / (1024 ** 3)))
         ram_gb_arg: Optional[int] = ram_gb_value if ram_gb_value > 0 else None
 
+        # The sidecar's workload is CPU-only (HDBSCAN + UMAP), but we still
+        # report the host's GPU so the Nodes UI / dispatcher know what
+        # silicon is *present* on this hostname.
+        gpu_model, gpu_count, gpu_vram_gb, gpu_driver = _detect_nvidia_gpu()
+
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -166,10 +233,10 @@ class WorkerRegistration:
                 [],                        # $7  cpu_features (skip the cpuid dance)
                 cpu_count,                 # $8  cpu_count
                 ram_gb_arg,                # $9  ram_gb
-                "",                        # $10 gpu_model (CPU-only sidecar)
-                0,                         # $11 gpu_count
-                0,                         # $12 gpu_vram_gb
-                "",                        # $13 driver_version
+                gpu_model,                 # $10 gpu_model
+                gpu_count,                 # $11 gpu_count
+                gpu_vram_gb,               # $12 gpu_vram_gb
+                gpu_driver,                # $13 driver_version
             )
 
     async def _heartbeat_loop(self) -> None:
