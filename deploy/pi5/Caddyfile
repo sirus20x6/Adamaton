@@ -121,6 +121,14 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         }
     }
 
+    # Push-deploy receiver. /deploy/health is unauth; all other endpoints
+    # require the bearer in DEPLOY_AGENT_TOKEN (checked by the agent itself).
+    @deploy_agent path /deploy/*
+    handle @deploy_agent {
+        uri strip_prefix /deploy
+        reverse_proxy deploy-agent:9128
+    }
+
     # SPA: static file server with index.html fallback.
     handle {
         root * /srv/frontend

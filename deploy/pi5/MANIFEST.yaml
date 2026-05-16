@@ -16,20 +16,22 @@
 host: pi5
 image_tag: "main"
 
-# Services that ship as adamaton-<service> images on this host.
-# Image refs in docker-compose.yml are: adamaton-<service>:${IMAGE_TAG}
+# Services that the deploy-agent will accept in /deploy/restart calls.
+# Must match the service names in docker-compose.yml verbatim.
+# Image refs in docker-compose.yml are: ${WORKSTATION_IP}:5000/adamaton-<image>:${ADAMATON_<NAME>_TAG}
 services:
-  - skills-rae
   - r2g
-  - reindex-worker
+  - skills-rae
+  - skills-rae-worker
   - skills-worker
-  - reranker
+  - reindex-worker
   - nano-research
   - nano-research-worker
   - figure-renderer
-  - dashboard
+  - backend
+  - worker-lo
   - plugin-host
   - dispatch-worker
-  - temporal-worker
+  - evo-api
   - evo-worker
-  - frontend
+  - deploy-agent
