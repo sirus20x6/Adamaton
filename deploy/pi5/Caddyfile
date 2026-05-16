@@ -1,0 +1,139 @@
+# deploy/pi5/Caddyfile — Adamomaton edge reverse proxy.
+#
+# Ported verbatim from pi5:~/deepresearch/infra/Caddyfile on 2026-05-16.
+# Routes to upstream Go services and the Python platform backend; the SPA
+# falls through as the default handler with index.html try-files.
+#
+# Browser will see a "not trusted" warning the first time per device until
+# you install Caddy's root cert (printed at startup, also at
+# /data/caddy/pki/authorities/local/root.crt inside the caddy container).
+
+deepresearch.local, deepresearch, adamomaton.local, adamomaton {
+    tls internal
+
+    encode gzip
+
+    # PostgREST read API — must precede the broader API routes.
+    @db path /db/*
+    handle @db {
+        uri strip_prefix /db
+        reverse_proxy postgrest:3000
+    }
+
+    # WebSocket — must precede the broader API routes.
+    @ws path /ws/*
+    handle @ws {
+        reverse_proxy backend:7272 {
+            transport http {
+                read_timeout 24h
+            }
+        }
+    }
+
+    # r2g full cutover (2026-05-14): the audited /v3 endpoints come from the
+    # Go reimplementation. Anything else under /v3/* falls through to R2R
+    # via the @api block below.
+    @r2g {
+        path /v3/documents /v3/documents/* /v3/chunks /v3/chunks/* /v3/retrieval/search
+    }
+    handle @r2g {
+        reverse_proxy r2g:7373 {
+            transport http {
+                read_timeout 600s
+            }
+        }
+    }
+
+    # /platform/* r2g cutover (2026-05-15): figures + sources + corpora + graph
+    # endpoints are owned by the Go r2g service now.
+    @platform_r2g {
+        path /platform/figures /platform/figures/* /platform/sources /platform/sources/ /platform/sources/* /platform/corpora /platform/corpora/* /platform/graph /platform/graph/*
+    }
+    handle @platform_r2g {
+        reverse_proxy r2g:7373 {
+            transport http {
+                read_timeout 600s
+            }
+        }
+    }
+
+    # NanoResearch SSE-aware proxy. /api/v1/nano/* → nano-research:7378.
+    # flush_interval -1 disables response buffering for the /events stream.
+    @nano_research {
+        path /api/v1/nano /api/v1/nano/*
+    }
+    handle @nano_research {
+        uri strip_prefix /api
+        reverse_proxy nano-research:7378 {
+            flush_interval -1
+            transport http {
+                read_timeout 1800s
+            }
+        }
+    }
+
+    # SkillRAE retrieval + context compilation service.
+    @skills_rae {
+        path /platform/skills/rae /platform/skills/rae/*
+    }
+    handle @skills_rae {
+        uri strip_prefix /platform/skills/rae
+        reverse_proxy skills-rae:7376 {
+            transport http {
+                read_timeout 60s
+            }
+        }
+    }
+
+    # plugin-host (Go) supervises plugin subprocesses (gRPC over Unix sockets).
+    @plugin_host {
+        path /platform/plugins /platform/plugins/* /platform/importers /platform/importers/* /platform/search /platform/search/* /platform/marketplace /platform/marketplace/* /platform/zotero /platform/zotero/*
+    }
+    handle @plugin_host {
+        reverse_proxy plugin-host:7375 {
+            transport http {
+                read_timeout 600s
+            }
+        }
+    }
+
+    # Backend REST API + platform routers (Python fallback).
+    @api path /v3/* /platform/*
+    handle @api {
+        reverse_proxy backend:7272 {
+            transport http {
+                read_timeout 300s
+            }
+        }
+    }
+
+    # evo-api dashboard/aggregator. Server-side bearer auth injected so the
+    # React bundle in the SPA below can talk to it same-origin without ever
+    # seeing the token. Strips the /evo-api prefix on the way out.
+    @evoapi path /evo-api/*
+    handle @evoapi {
+        uri strip_prefix /evo-api
+        request_header Authorization "Bearer {env.EVO_API_TOKEN}"
+        reverse_proxy evo-api:9123 {
+            transport http {
+                read_timeout 1800s
+            }
+        }
+    }
+
+    # SPA: static file server with index.html fallback.
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+
+    request_body {
+        max_size 256MB
+    }
+}
+
+# Plain HTTP → HTTPS redirect; also catches LAN-IP bookmarks.
+http://deepresearch.local, http://deepresearch, http://adamomaton.local, http://adamomaton, http://10.0.4.30, http://10.0.4.31 {
+    redir https://adamomaton.local{uri} permanent
+}

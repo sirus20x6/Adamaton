@@ -1,0 +1,47 @@
+# deploy/pi5-speaker/docker-compose.yml — replica node (Raspberry Pi 5, arm64).
+#
+# Runs ONLY:
+#   - nano-research-worker  (extra Temporal worker on the nano-research queue)
+#   - figure-renderer       (matplotlib sidecar; local LAN-internal hop)
+#
+# Backing services (postgres, temporal, skills-rae) live on Pi #1 and are
+# reached over the LAN via PI1_HOST (set in .env). Pi #1 must expose:
+#   - postgres :5432   (already 0.0.0.0:5432 in deploy/pi5)
+#   - temporal :7233   (already 0.0.0.0:7233 in deploy/pi5)
+#   - skills-rae :7376 (already 0.0.0.0:7376 in deploy/pi5)
+#
+# Pattern ported from /thearray/git/evo/nano-research/deploy/pi-replica/docker-compose.yml.
+
+services:
+  nano-research-worker:
+    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    entrypoint: ["/usr/local/bin/nano-research-worker"]
+    environment:
+      NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-http://10.0.4.37:9080/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.6-27b-nvfp8}
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-qwen3.6-27b-nvfp8}
+      SKILLS_RAE_URL: http://${PI1_HOST}:7376
+      TEMPORAL_ADDRESS: ${PI1_HOST}:7233
+      TEMPORAL_NAMESPACE: default
+      NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
+      # Figure renderer is local to this node -- fast LAN-internal hop.
+      FIGURE_RENDERER_URL: http://figure-renderer:8090
+      # Stamp this worker's identity so kill-tests + dashboards can tell
+      # which physical Pi handled a given activity.
+      NANO_WORKER_LABEL: pi5-speaker
+    volumes:
+      # Workspace is per-worker on this node. nano-research stages that
+      # need cross-worker file sharing dispatch to Blackwell via rsync
+      # anyway, so this is just scratch space for local activities.
+      - nano_workspace:/var/lib/nano-research
+    restart: unless-stopped
+
+  figure-renderer:
+    image: adamomaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    expose:
+      - "8090"
+    restart: unless-stopped
+
+volumes:
+  nano_workspace:

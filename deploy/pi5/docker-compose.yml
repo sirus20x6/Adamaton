@@ -1,0 +1,458 @@
+# deploy/pi5/docker-compose.yml — main Adamomaton stack (Raspberry Pi 5, arm64).
+#
+# Source of truth ported from pi5:~/deepresearch/docker-compose.yml (the live
+# production compose) on 2026-05-16, with image names rewritten to the
+# adamomaton-<component>:<umbrella-sha-short> convention. The umbrella SHA is
+# substituted at deploy time by up.sh via the IMAGE_TAG env var.
+#
+# Services:
+#   - postgres (pgvector/pgvector:pg16) — shared backing store for every schema
+#   - redis (7-alpine) — arq queue + cache for the Python backend
+#   - searxng — meta-search engine for nano-research stage 2 (web)
+#   - temporal (auto-setup:1.27) — workflow engine
+#   - postgrest — read-only API exposed at /db/* via Caddy
+#   - r2g (Go) — ports the audited /v3 endpoints (documents, chunks, search)
+#   - plugin-host (Go) — supervises plugin subprocesses (gRPC over unix socket)
+#   - skills-rae + skills-rae-worker (Go) — SkillRAE retrieval + indexer
+#   - nano-research + nano-research-worker (Go) — autonomous research pipeline
+#   - figure-renderer — matplotlib sidecar invoked by nano-research
+#   - reranker — cross-encoder reranker for r2g
+#   - backend (Python) — R2R-based platform backend (graphrag, deep ingest)
+#   - worker-lo (Python) — graphrag + heavy arq jobs
+#   - evo-api (Go) — dashboard/aggregator API (the /api/v1/* surface)
+#   - skills-worker, reindex-worker, dispatch-worker, evo-worker — Temporal workers
+#   - frontend (caddy:2-alpine) — SPA host + reverse proxy (Caddyfile)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./postgres-pi.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 200mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    ports:
+      - "8888:8080"
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.27
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_SEEDS: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233"
+    expose:
+      - "7233"
+    restart: unless-stopped
+
+  postgrest:
+    image: postgrest/postgrest:v12.2.3
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: api
+      PGRST_DB_ANON_ROLE: postgrest_anon
+      PGRST_DB_POOL: "10"
+      PGRST_OPENAPI_MODE: ignore-privileges
+      PGRST_SERVER_PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  # ---- knowledge sub-repo --------------------------------------------------
+  r2g:
+    image: adamomaton-r2g:${IMAGE_TAG:-dev}
+    environment:
+      R2G_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      R2G_PORT: "7373"
+      R2G_PPROF_PORT: "7374"
+      R2G_LOG_FORMAT: json
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      LATEX2TEXT_BIN: /app/bin/latex2text
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-http://10.0.4.37:9080/v1}
+      R2G_LLM_MODEL: ${R2G_LLM_MODEL:-qwen3.6-27b-nvfp8}
+      R2G_DEFAULT_OWNER_ID: ${R2G_DEFAULT_OWNER_ID:-2acb499e-8428-543b-bd85-0d9098718220}
+      R2G_RERANKER_URL: http://reranker:8091
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7373:7373"
+      - "7374:7374"
+    volumes:
+      - dr_uploads:/var/lib/dr-uploads:rw
+    restart: unless-stopped
+
+  skills-rae:
+    image: adamomaton-skills-rae:${IMAGE_TAG:-dev}
+    environment:
+      SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      SKILLS_RAE_PORT: "7376"
+      SKILLS_RAE_PPROF_PORT: "7377"
+      SKILLS_RAE_LOG_FORMAT: json
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      SKILLS_RAE_EMBED_MODEL: bge-m3
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "7376"
+    ports:
+      - "7376:7376"
+    restart: unless-stopped
+
+  skills-rae-worker:
+    image: adamomaton-skills-rae-worker:${IMAGE_TAG:-dev}
+    environment:
+      SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      SKILLS_RAE_EMBED_MODEL: bge-m3
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      SKILLS_RAE_LOG_LEVEL: info
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  skills-worker:
+    hostname: pi
+    image: adamomaton-skills-worker:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      SKILLS_R2R_BASE_URL: http://backend:7272
+      SKILLS_R2R_ENABLED: "true"
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  reindex-worker:
+    hostname: pi
+    image: adamomaton-reindex-worker:${IMAGE_TAG:-dev}
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      PLATFORM_BASE_URL: http://backend:7272
+      LOG_LEVEL: info
+      R2G_URL: http://r2g:7373
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  reranker:
+    # Python sidecar — image still built by the legacy platform/reranker
+    # context. Keeping the old name until cross-compile pipeline ships
+    # an adamomaton-reranker variant.
+    image: evo-reranker:dev
+    environment:
+      RERANKER_MODEL: cross-encoder/ms-marco-MiniLM-L-6-v2
+      LOG_LEVEL: INFO
+    expose:
+      - "8091"
+    volumes:
+      - reranker_hf_cache:/models
+    restart: unless-stopped
+
+  # ---- deepresearch sub-repo ----------------------------------------------
+  nano-research:
+    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    environment:
+      NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      NANO_RESEARCH_PORT: "7378"
+      NANO_RESEARCH_WORKSPACE: /var/lib/nano-research
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    volumes:
+      - nano_workspace:/var/lib/nano-research
+    expose:
+      - "7378"
+    restart: unless-stopped
+
+  nano-research-worker:
+    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    entrypoint: ["/usr/local/bin/nano-research-worker"]
+    environment:
+      NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-http://10.0.4.37:9080/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.6-27b-nvfp8}
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-qwen3.6-27b-nvfp8}
+      SKILLS_RAE_URL: http://skills-rae:7376
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
+      FIGURE_RENDERER_URL: http://figure-renderer:8090
+      NANO_WORKER_LABEL: pi5
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    volumes:
+      - nano_workspace:/var/lib/nano-research
+    restart: unless-stopped
+
+  figure-renderer:
+    image: adamomaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    expose:
+      - "8090"
+    restart: unless-stopped
+
+  # ---- platform sub-repo --------------------------------------------------
+  backend:
+    init: true
+    # Python R2R backend. Still built from the platform sub-repo until the
+    # planned platform/backend → Go cutover lands.
+    image: adamomaton-platform-backend:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      R2R_CONFIG_PATH: /app/configs/platform.toml
+      PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
+      REDIS_URL: redis://redis:6379
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
+      RESEARCH_USE_OCTEN_RETRIEVAL: "true"
+      RESEARCH_RERANK_TIMEOUT: "30"
+      LITELLM_LOG: ${LITELLM_LOG:-INFO}
+      R2R_POSTGRES_MAX_CONNECTIONS: "40"
+      SEARXNG_URL: http://searxng:8080
+      R2R_INTERNAL_URL: http://r2g:7373
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "7272:7272"
+    volumes:
+      - dr_uploads:/var/lib/dr-uploads:rw
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7272/platform/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 1800s
+    restart: unless-stopped
+
+  worker-lo:
+    image: adamomaton-platform-backend:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      R2R_CONFIG_PATH: /app/configs/platform.toml
+      PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
+      REDIS_URL: redis://redis:6379
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
+      R2R_INTERNAL_URL: http://r2g:7373
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - dr_uploads:/var/lib/dr-uploads:rw
+    entrypoint:
+      - bash
+      - -c
+      - exec python -m arq app.workers.lo_worker.WorkerSettings
+    restart: unless-stopped
+
+  plugin-host:
+    image: adamomaton-plugin-host:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      PH_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      PH_PORT: "7375"
+      PH_MANIFEST_DIR: /etc/deepresearch/plugins
+      PH_SOCKET_DIR: /run/dr-plugins
+      PH_DR_UPLOADS_DIR: /var/lib/dr-uploads
+      PH_LOG_FORMAT: json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "7375"
+    volumes:
+      - ./plugin-manifests:/etc/deepresearch/plugins:ro
+      - dr_uploads:/var/lib/dr-uploads:rw
+    restart: unless-stopped
+
+  dispatch-worker:
+    hostname: pi
+    image: adamomaton-dispatch-worker:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  evo-api:
+    image: adamomaton-evo-api:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      GITEA_BASE_URL: ${GITEA_BASE_URL:-http://localhost}
+      TEMPORAL_ADDRESS: temporal:7233
+      API_BIND_ADDRESS: 0.0.0.0
+      API_TOKEN: ${EVO_API_TOKEN}
+      PORT: "9123"
+      DEEPRESEARCH_URL: http://backend:7272
+      CCSAVER_DB: /data/ccsaver/data.db
+      DASHBOARD_BASE_PATH: /evo-api
+    volumes:
+      - /srv/ccsaver:/data/ccsaver:ro
+      - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
+      - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/projects:/root/.claude/projects:ro
+      - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/codex/memories:/root/.codex/memories:ro
+      - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/gemini/GEMINI.md:/root/.gemini/GEMINI.md:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    expose:
+      - "9123"
+    restart: unless-stopped
+
+  # ---- evolve sub-repo ----------------------------------------------------
+  evo-worker:
+    hostname: pi
+    image: adamomaton-evo-worker:${IMAGE_TAG:-dev}
+    env_file: [.env]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      EVO_TASK_QUEUE: evo
+      DEEPRESEARCH_URL: http://backend:7272
+      LOG_LEVEL: info
+      # KernelBench evals dispatch to blackwell via ssh per
+      # `evolve: dual-target kernel eval via RemoteHost ssh` (86e6208).
+      # Leave empty on the Pi so the worker only handles the cheap activities;
+      # the blackwell stack runs another evo-worker with this populated.
+      EVO_KERNEL_REMOTE_HOST: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---- frontend sub-repo + edge proxy -------------------------------------
+  frontend:
+    # Caddy reverse-proxies every API and serves the SPA. The frontend SPA
+    # bundle is built on the workstation and rsynced to ./frontend-dist/
+    # by up.sh; we bind-mount it read-only into the caddy container.
+    image: caddy:2-alpine
+    volumes:
+      - ./frontend-dist:/srv/frontend:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - evo-api
+      - nano-research
+      - r2g
+      - skills-rae
+      - plugin-host
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  dr_uploads:
+  reranker_hf_cache:
+  caddy_data:
+  caddy_config:
+  nano_workspace:

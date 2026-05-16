@@ -15,6 +15,12 @@
 /bin/*.arm64
 /bin/*.amd64
 
+# Per-host deploy secrets — .env.example is tracked, .env is local-only
+/deploy/*/.env
+
+# Frontend bundle rsynced into deploy/pi5/ at deploy time
+/deploy/pi5/frontend-dist/
+
 # Editor / OS
 .vscode/
 .idea/
