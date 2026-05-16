@@ -8,7 +8,7 @@
 # you install Caddy's root cert (printed at startup, also at
 # /data/caddy/pki/authorities/local/root.crt inside the caddy container).
 
-deepresearch.local, deepresearch, adamomaton.local, adamomaton {
+deepresearch.local, deepresearch, adamaton.local, adamaton {
     tls internal
 
     encode gzip
