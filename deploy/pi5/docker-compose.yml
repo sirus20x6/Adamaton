@@ -386,12 +386,22 @@ services:
       DEEPRESEARCH_URL: http://backend:7272
       CCSAVER_DB: /data/ccsaver/data.db
       DASHBOARD_BASE_PATH: /evo-api
+      # The pluginloader honors EVO_PLUGIN_DIRS (colon-separated) and falls
+      # back to ${EVO_HOME}/plugins/{builtin,community,n8n}. We bind-mount
+      # the umbrella's workflow-builder plugin trees below so the Connectors
+      # page has content without rebuilding the image.
+      EVO_HOME: /opt/evo
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/projects:/root/.claude/projects:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/codex/memories:/root/.codex/memories:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/gemini/GEMINI.md:/root/.gemini/GEMINI.md:ro
+      # Workflow-node catalog (builtin checks, n8n imports, community).
+      # Read-only — the apiserver only enumerates them. New n8n nodes are
+      # added by running `go run ./cmd/n8n-import <pkg>` from the evolve
+      # sub-repo; the loader reads them on next evo-api restart.
+      - ../../evolve/workflow-builder/plugins:/opt/evo/plugins:ro
     depends_on:
       postgres:
         condition: service_healthy
