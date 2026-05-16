@@ -1,0 +1,68 @@
+# /thearray/git/evo/systemd/temporal-server.service
+# Requires: useradd -r -s /usr/sbin/nologin temporal && chown -R temporal:temporal /opt/temporal
+# Pre-install steps:
+#   sudo mkdir -p /opt/temporal/bin /opt/temporal/configs
+#   sudo cp /path/to/temporal-server /opt/temporal/bin/
+#   sudo cp configs/* /opt/temporal/configs/
+#   sudo useradd -r -s /usr/sbin/nologin temporal || true
+#   sudo chown -R temporal:temporal /opt/temporal /var/lib/temporal
+[Unit]
+Description=Temporal Server with ScyllaDB
+Documentation=https://temporal.io/
+After=network.target scylla-server.service
+Wants=scylla-server.service
+PartOf=evo.target
+
+[Service]
+Type=simple
+# Service-account user, NOT a developer login. The 'temporal' account should
+# be created with -r -s /usr/sbin/nologin so a compromised binary can't be
+# used as an interactive shell.
+User=temporal
+Group=temporal
+WorkingDirectory=/opt/temporal
+ExecStartPre=/bin/mkdir -p /var/lib/temporal/archival/history /var/lib/temporal/archival/visibility
+ExecStartPre=/bin/chown -R temporal:temporal /var/lib/temporal
+ExecStart=/opt/temporal/bin/temporal-server --root /opt/temporal --config configs --env temporal-scylla --allow-no-auth start
+# on-failure rather than always so a misconfigured Temporal binary does not
+# spin up an unbounded restart loop. RestartSec backs off between attempts.
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=temporal-server
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=200%
+LimitNOFILE=65535
+
+# Security hardening. The service still needs IPv4/IPv6 + UNIX sockets to
+# talk to ScyllaDB and serve gRPC clients, so AF_NETLINK and other families
+# are blocked. SystemCallFilter=@system-service is the systemd-curated
+# whitelist that covers the typical server-process syscall surface.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/temporal /tmp
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+
+# Health monitoring
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Environment
+Environment=TEMPORAL_CLI_ADDRESS=localhost:7233
+Environment=TEMPORAL_ENVIRONMENT=development
+
+[Install]
+WantedBy=evo.target

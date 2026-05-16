@@ -1,0 +1,178 @@
+# /thearray/gogents/configs/production.yaml
+# GoGents Production Configuration
+# Complete configuration for all 12 AI agents
+
+# Core Service Configuration
+github:
+  # github.token: leave empty; set GITHUB_TOKEN env var instead. Viper does
+  # NOT expand ${...} shell-style references, so a literal "${GITHUB_TOKEN}"
+  # here would silently become the credential the agent uses. The empty
+  # string makes the env-var path the only honored source.
+  token: ""
+
+vllm:
+  endpoint: "http://vllm-cluster:8000/generate"
+  timeout: "3m"
+  max_tokens: 512
+  temperature: 0.1
+
+mcp:
+  server_url: "http://mcp-server:3000"
+  timeout: "2m"
+
+temporal:
+  address: "temporal-cluster:7233"
+  namespace: "production"
+  # Bug 4 (Pass 14): aligned with the cmd/start-workflow default of "pr-review"
+  # and the worker registration default. The previous "pr-review-prod" caused
+  # workflows started via the CLI/scripts to land on a queue no worker polled.
+  # If you need a per-environment queue, set TEMPORAL_TASK_QUEUE on BOTH the
+  # worker and every starter (start-workflow CLI, gitea-webhook, apiserver).
+  task_queue: "pr-review"
+
+# Enhanced Workflow Configuration
+workflow:
+  pass_threshold: 0.80              # Higher threshold for production
+  merge_method: "squash"
+  require_all_critical: true       # All critical agents must pass
+  block_on_critical: true          # Block on any critical severity issues
+
+# Comprehensive Agent Configuration (12 Agents)
+agents:
+  # CRITICAL AGENTS (Weight: 2.0, Required: true)
+  security:
+    enabled: true
+    weight: 2.0
+    required: true
+    max_tokens: 768                 # More tokens for thorough security analysis
+    temperature: 0.05               # Very low temperature for security precision
+    
+  compliance:
+    enabled: true
+    weight: 2.0
+    required: true
+    max_tokens: 768
+    temperature: 0.05
+    
+  business_logic:
+    enabled: true
+    weight: 2.0
+    required: true
+    max_tokens: 1024                # Most tokens for complex business analysis
+    temperature: 0.1
+
+  # IMPORTANT AGENTS (Weight: 1.5, Required: false)
+  performance:
+    enabled: true
+    weight: 1.5
+    required: false
+    max_tokens: 512
+    temperature: 0.1
+    
+  testing:
+    enabled: true
+    weight: 1.5
+    required: false
+    max_tokens: 768                 # More tokens for test analysis
+    temperature: 0.1
+    
+  architecture:
+    enabled: true
+    weight: 1.5
+    required: false
+    max_tokens: 768
+    temperature: 0.15               # Slightly higher for design creativity
+    
+  dependencies:
+    enabled: true
+    weight: 1.5
+    required: false
+    max_tokens: 512
+    temperature: 0.1
+    
+  maintainability:
+    enabled: true
+    weight: 1.5
+    required: false
+    max_tokens: 512
+    temperature: 0.15
+
+  # STANDARD AGENTS (Weight: 1.0, Required: false)
+  documentation:
+    enabled: true
+    weight: 1.0
+    required: false
+    max_tokens: 512
+    temperature: 0.2                # Higher temperature for documentation creativity
+    
+  accessibility:
+    enabled: true
+    weight: 1.0
+    required: false
+    max_tokens: 512
+    temperature: 0.1
+    
+  const:
+    enabled: true
+    weight: 1.0
+    required: false
+    max_tokens: 256                 # Fewer tokens for focused const analysis
+    temperature: 0.05
+
+  # STYLE AGENT (Weight: 0.5, Required: false)
+  style:
+    enabled: true
+    weight: 0.5                     # Lowest weight for style issues
+    required: false
+    max_tokens: 256
+    temperature: 0.05
+
+# -----------------------------------------------------------------------------
+# Gitea integration (alternative to GitHub via gitea.token env var; YAML
+# does NOT shell-expand ${GITEA_TOKEN}). Required when running with the
+# webhook handler.
+# -----------------------------------------------------------------------------
+# gitea:
+#   base_url: ""                     # e.g. https://gitea.example.com
+#   allow_insecure_tls: false
+#   webhook_secret: ""               # set via GITEA_WEBHOOK_SECRET env, NOT here
+#   merge_method: "merge"            # one of: merge, rebase, rebase-merge, squash, fast-forward-only
+
+# -----------------------------------------------------------------------------
+# Apiserver tuning (Pass 11/12)
+# -----------------------------------------------------------------------------
+# api:
+#   bind_address: "0.0.0.0:9123"
+#   cors_origins: []                 # empty = same-origin only
+#   max_inflight_workflows: 50
+
+# -----------------------------------------------------------------------------
+# LLM client tuning (the bare endpoint; the client appends /generate or
+# /v1/chat/completions itself depending on use_chat_api).
+# -----------------------------------------------------------------------------
+# llm:
+#   endpoint: "http://localhost:8000"
+#   timeout: 60s
+#   retry_attempts: 2
+#   model_name: ""                   # empty = upstream default
+#   use_chat_api: true
+
+# -----------------------------------------------------------------------------
+# Webhook server tuning (Pass 11)
+# -----------------------------------------------------------------------------
+# webhook:
+#   port: 8090
+#   max_inflight: 50
+
+# Logging Configuration
+logging:
+  level: "info"
+  format: "json"
+
+# Advanced Features
+features:
+  detailed_comments: true           # Generate detailed GitHub comments
+  severity_emojis: true            # Use emoji indicators for severity
+  confidence_reporting: true       # Include confidence scores in comments
+  agent_timing: true               # Log individual agent execution times
+  parallel_optimization: true      # Optimize for parallel execution

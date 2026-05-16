@@ -1,0 +1,1 @@
+This guide covers setting up a development environment for GoGents, the enterprise-grade AI-driven PR review system. It includes detailed instructions for local development, testing, debugging, and contributing to the project.

@@ -1,0 +1,77 @@
+# /thearray/git/evo/systemd/evo-worker@.service
+[Unit]
+Description=GoGents Worker %i - AI Agent Processing
+Documentation=https://github.com/thearray/git/evo
+After=network.target temporal-server.service
+Wants=temporal-server.service
+PartOf=evo.target
+
+[Service]
+Type=exec
+User=evo
+Group=evo
+WorkingDirectory=/opt/evo
+ExecStart=/opt/evo/bin/worker
+# on-failure rather than always: a misconfigured worker that immediately
+# log.Fatals would otherwise spin up an unbounded restart loop. RestartSec
+# spaces the retries.
+Restart=on-failure
+RestartSec=10
+
+# Environment variables
+Environment=WORKER_ID=worker-%i
+Environment=TEMPORAL_ADDRESS=localhost:7233
+Environment=VLLM_ENDPOINT=http://localhost:8000/generate
+Environment=MCP_SERVER_URL=http://localhost:3000
+Environment=METRICS_ENABLED=true
+Environment=LOG_LEVEL=info
+Environment=GOGENTS_WORKFLOW_PASS_THRESHOLD=0.75
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=100%
+TasksMax=200
+
+# Security hardening. Workers don't bind privileged ports, so
+# CapabilityBoundingSet is empty (the baseline). The additions clamp syscall
+# surface and address families to what a Temporal worker actually needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# ReadWritePaths must list every directory the worker writes. Workers append
+# to logs, write checkpoints under /opt/evo/data, and own the SQLite
+# workflow/budget DBs under /var/lib/evo — without all of these,
+# ProtectSystem=strict denies writes and the binary fails on first DB write.
+ReadWritePaths=/opt/evo/logs /opt/evo/data /var/lib/evo /var/log/evo
+# UMask=0077 (per Stream E contract) so SQLite WAL/SHM files inherit
+# owner-only permissions on every recreate.
+UMask=0077
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LimitNOFILE=65535
+
+# Networking
+# IPAddressDeny=any was removed: production deployments routinely require
+# non-loopback egress (Gitea, vLLM, MCP) and the cgroup BPF filter has no
+# useful failure mode. Defense in-depth via SystemCallFilter, ProtectSystem,
+# NoNewPrivileges, RestrictAddressFamilies, and ReadWritePaths. Operators
+# wanting strict egress can add a drop-in at
+# /etc/systemd/system/evo-worker@.service.d/network.conf with explicit
+# IPAddressAllow CIDRs.
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=evo-worker-%i
+
+[Install]
+WantedBy=evo.target

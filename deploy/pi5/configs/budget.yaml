@@ -1,0 +1,52 @@
+budget_router:
+  listen_addr: "127.0.0.1:8070"
+  api_token: ""  # Required when binding to 0.0.0.0 or another public address
+  db_path: "data/budget.db"
+  daily_reset_hour: 0
+  weekly_reset_day: 1  # Monday
+  timezone: "UTC"
+  log_level: "info"
+  providers:
+    - provider: claude
+      tier: cloud
+      strength: 0.95
+      daily_limit: 200000
+      weekly_limit: 1000000
+      default_model: claude-sonnet-4-5-20250929
+      models:
+        critical: claude-opus-4-5-20251101
+        high: claude-sonnet-4-5-20250929
+        medium: claude-haiku-4-5-20251001
+        low: claude-haiku-4-5-20251001
+      cost_per_m_token: 3.00
+    - provider: openai
+      tier: cloud
+      strength: 0.85
+      daily_limit: 300000
+      weekly_limit: 1500000
+      default_model: gpt-4o
+      models:
+        critical: gpt-4o
+        high: gpt-4o
+        medium: gpt-4o-mini
+        low: gpt-4o-mini
+      cost_per_m_token: 2.50
+    - provider: gemini
+      tier: cloud
+      strength: 0.80
+      daily_limit: 500000
+      weekly_limit: 2000000
+      default_model: gemini-2.0-flash
+      models:
+        critical: gemini-2.0-pro
+        high: gemini-2.0-flash
+        medium: gemini-2.0-flash
+        low: gemini-2.0-flash-lite
+      cost_per_m_token: 1.25
+    - provider: local
+      tier: local
+      strength: 0.45
+      daily_limit: 0
+      weekly_limit: 0
+      default_model: qwen-coder-next
+      cost_per_m_token: 0.0

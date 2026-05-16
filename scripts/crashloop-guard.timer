@@ -1,0 +1,16 @@
+[Unit]
+Description=Run crashloop-guard every 30s
+Documentation=man:systemd.timer(5)
+
+[Timer]
+# Start 60s after boot so docker is fully up.
+OnBootSec=60s
+# Then every 30s. 30s is short enough that a runaway restart-policy
+# (which can fire ~1/s) gets caught after ~5 retries; long enough that
+# the polling itself doesn't load the system.
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

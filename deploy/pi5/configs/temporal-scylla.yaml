@@ -1,0 +1,117 @@
+# /thearray/gogents/configs/temporal-scylla.yaml
+# Temporal configuration for ScyllaDB with Elasticsearch for Visibility - Gogents Project
+log:
+  stdout: true
+  level: info
+
+persistence:
+  defaultStore: scylla-main                     # Main data on ScyllaDB
+  visibilityStore: elasticsearch-advanced        # Advanced visibility on Elasticsearch
+  numHistoryShards: 4                            # Default, usually 4 or based on load
+  datastores:
+    scylla-main:                               # Datastore for main Temporal data
+      cassandra:                               # Using the cassandra driver for ScyllaDB
+        hosts: "127.0.0.1"
+        port: 9042
+        user: ""                               # Update if ScyllaDB requires auth
+        password: ""                           # Update if ScyllaDB requires auth
+        keyspace: "temporal"                   # Keyspace for core Temporal data
+        consistency:
+          default:
+            consistency: "local_quorum"        # Standard for multi-node, "one" for single-node dev
+            serialConsistency: "local_serial"  # Standard for multi-node
+        # ScyllaDB specific optimizations (can be tuned)
+        maxConns: 20                           # Max connections per host
+        disableInitialHostLookup: false        # Recommended for ScyllaDB
+        connectTimeout: "30s"                  # Connection timeout
+    elasticsearch-advanced:                    # Datastore for advanced visibility
+      elasticsearch:                           # Using the elasticsearch driver
+        version: "v7"                          # Good practice to specify ES version
+        logLevel: "error"                      # Reduces ES client log verbosity
+        url:
+          scheme: "http"
+          host: "127.0.0.1:9200"
+        username: ""                           # Update if Elasticsearch requires auth
+        password: ""                           # Update if Elasticsearch requires auth
+        indices:
+          visibility: "temporal_visibility_v1_dev" # Name of the visibility index in Elasticsearch
+        closeIdleConnectionsInterval: 15s
+
+global:
+  membership:
+    maxJoinDuration: 30s
+    broadcastAddress: "127.0.0.1"              # Address advertised to other nodes in the cluster
+  pprof:
+    port: 7936                                 # Port for Go pprof debugging
+  metrics:
+    prometheus:
+      framework: "tally"
+      timerType: "histogram"
+      listenAddress: "127.0.0.1:8000"          # Address for Prometheus metrics endpoint
+
+services:
+  frontend:
+    rpc:
+      grpcPort: 7233                           # Port for gRPC API
+      membershipPort: 6933                     # Port for Ringpop membership
+      bindOnLocalHost: true                    # Bind to 127.0.0.1 only
+      # httpPort: 7243                         # Optional: HTTP/JSON API port (uncomment if needed)
+
+  matching:
+    rpc:
+      grpcPort: 7235
+      membershipPort: 6935
+      bindOnLocalHost: true
+
+  history:
+    rpc:
+      grpcPort: 7234
+      membershipPort: 6934
+      bindOnLocalHost: true
+
+  worker: # Internal system worker service
+    rpc:
+      grpcPort: 7239
+      membershipPort: 6939
+      bindOnLocalHost: true
+
+clusterMetadata:
+  enableGlobalNamespace: false                 # Set to true for XDC replication
+  failoverVersionIncrement: 10
+  masterClusterName: "active"                  # Name of the primary cluster
+  currentClusterName: "active"                 # Name of this cluster
+  clusterInformation:
+    active:                                    # Information for the 'active' cluster
+      enabled: true
+      initialFailoverVersion: 1
+      rpcName: "frontend"                      # Service name for RPC
+      rpcAddress: "127.0.0.1:7233"             # Address for other clusters to reach this one's frontend
+
+dcRedirectionPolicy:                           # For XDC redirection (not critical for single cluster)
+  policy: "noop"
+
+archival:                                      # Archival settings for history and visibility
+  history:
+    state: "enabled"                           # Keep 'enabled' or set to 'disabled' if you don't need history archival
+    enableRead: true
+    provider:
+      filestore:                               # Example: filestore provider for history
+        fileMode: "0666"
+        dirMode: "0766"
+  visibility:
+    state: "disabled"                          # Visibility archival disabled as ES is primary
+    enableRead: false                          # Set to false when state is disabled
+    # provider section for visibility is removed/commented as state is disabled
+
+namespaceDefaults:                             # Default archival settings for new namespaces
+  archival:
+    history:
+      state: "disabled"                        # Default for new namespaces
+      URI: "file:///var/lib/temporal/archival/history" # Path for history archival if enabled per namespace
+    visibility:
+      state: "disabled"                        # Default for new namespaces
+      URI: ""                                  # Set to empty or remove line if default state is disabled
+
+dynamicConfigClient:
+  filepath: "/thearray/gogents/configs/dynamicconfig/temporal-scylla.yaml" # Path to your dynamic config file
+  pollInterval: "10s"                          # How often to check for updates

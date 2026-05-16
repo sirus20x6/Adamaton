@@ -1,0 +1,69 @@
+# /thearray/git/evo/systemd/reindex-worker.service
+#
+# Temporal worker for the arxiv-reindex subsystem. Replaces the bash
+# loop in dashboard/reindex-arxiv-latex/reindex-arxiv-latex.sh — same
+# work units, but concurrent fan-out, durable retries, and queryable
+# per-paper progress through Temporal history.
+#
+# When this unit goes green on the Pi, disable reindex-arxiv-latex.service
+# (but keep the script + unit file in the repo for one sprint as fallback).
+[Unit]
+Description=evo arxiv reindex Temporal worker (LaTeX path re-ingest)
+Documentation=https://github.com/thearray/git/evo
+After=network.target temporal-server.service deepresearch-postgres-1.service
+Wants=temporal-server.service
+PartOf=evo.target
+
+[Service]
+Type=exec
+User=evo
+Group=evo
+WorkingDirectory=/opt/evo
+ExecStart=/opt/evo/bin/reindex-worker
+Restart=on-failure
+RestartSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+# Long stop: an in-flight IngestArxivPaper activity can be in the middle
+# of a 240s platform call. We want it to finish (Temporal will record
+# the result) rather than be SIGKILLed.
+TimeoutStopSec=270
+
+# REINDEX_POSTGRES_DSN points at the deepresearch postgres on the Pi
+# (typically the docker-compose service "deepresearch-postgres-1");
+# PLATFORM_BASE_URL is the Caddy-fronted https://deepresearch.local.
+# REINDEX_TLS_INSECURE=1 is appropriate on the Pi itself where the
+# self-signed Caddy cert isn't in the system store.
+EnvironmentFile=-/etc/evo/reindex-worker.env
+Environment=TEMPORAL_ADDRESS=localhost:7233
+Environment=TEMPORAL_NAMESPACE=default
+Environment=LOG_LEVEL=info
+
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=200
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/evo /var/lib/evo
+UMask=0077
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reindex-worker
+
+[Install]
+WantedBy=evo.target

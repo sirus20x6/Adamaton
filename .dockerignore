@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/.next
+**/dist
+**/build
+**/*.log
+**/.venv
+deepresearch
+ui/dist
+ui/node_modules
+dashboard/ui/dist
+dashboard/ui/node_modules
+mcp/node_modules

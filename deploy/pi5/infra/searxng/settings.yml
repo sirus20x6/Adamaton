@@ -1,0 +1,120 @@
+# Initial SearXNG config for the deepresearch platform.
+# The engines list will evolve as we tune retrieval quality.
+
+general:
+  instance_name: "deepresearch-searxng"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json   # required so our adapter can parse structured results
+
+default_doi_resolver: "oadoi.org"
+
+doi_resolvers:
+  oadoi.org: "https://oadoi.org/"
+  doi.org: "https://doi.org/"
+  doai.io: "https://dissem.in/"
+  sci-hub.se: "https://sci-hub.se/"
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  # NOTE: replace via environment / secrets at deploy time. Do NOT ship this in production.
+  secret_key: "REPLACE_ME_VIA_ENV"
+  base_url: false
+  limiter: false
+  image_proxy: false
+  http_protocol_version: "1.0"
+  method: "POST"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+ui:
+  default_locale: "en"
+  query_in_title: false
+  infinite_scroll: false
+  static_use_hash: false
+  default_theme: simple
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    categories: science
+    timeout: 6.0
+    disabled: false
+
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+
+  - name: stackoverflow
+    engine: stackexchange
+    shortcut: so
+    api_site: "stackoverflow"
+    categories: it
+    disabled: false
+
+  - name: semantic scholar
+    engine: semantic_scholar
+    shortcut: se
+    categories: science
+    disabled: false
+
+  - name: pubmed
+    engine: pubmed
+    shortcut: pub
+    categories: science
+    disabled: false
+
+  # Shopping engines explicitly disabled.
+  - name: amazon
+    engine: amazon
+    shortcut: amz
+    disabled: true
+
+  - name: ebay
+    engine: ebay
+    shortcut: eb
+    disabled: true

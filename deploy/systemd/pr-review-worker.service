@@ -1,0 +1,75 @@
+# /thearray/git/evo/systemd/pr-review-worker.service - Systemd service for enhanced PR review worker
+[Unit]
+Description=Enhanced AI-Driven PR Review Worker (Week 2)
+Documentation=https://github.com/thearray/git/evo
+After=network.target temporal-server.service
+Wants=temporal-server.service
+Requires=network.target
+
+[Service]
+# Service configuration. Restart=on-failure (not always) so a worker that
+# log.Fatals at startup doesn't trigger an unbounded restart loop while
+# operators are still tracing the root cause.
+Type=simple
+Restart=on-failure
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# User and permissions
+User=evo
+Group=evo
+WorkingDirectory=/opt/evo
+
+# Environment
+EnvironmentFile=/etc/evo/worker.env
+Environment=PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+
+# Execution
+ExecStart=/opt/evo/bin/worker
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Security settings. The hardened directives below match evo-api and
+# evo-worker@ — keeping the unit set consistent makes it easier to reason
+# about the trust boundary across the whole evo* target.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# ReadWritePaths covers the worker's log dir and the SQLite credential/
+# workflow/budget DB directory. Without these, ProtectSystem=strict denies
+# writes and the worker fails on first DB write.
+ReadWritePaths=/var/log/evo /var/lib/evo
+# UMask=0077 (per Stream E contract) so SQLite WAL/SHM files inherit
+# owner-only permissions on every recreate.
+UMask=0077
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictSUIDSGID=true
+
+# Resource limits (LimitNOFILE already 65536 — keep the higher value rather
+# than dropping to 65535 from the shared template).
+LimitNOFILE=65536
+MemoryHigh=1G
+MemoryMax=2G
+TasksMax=1000
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pr-review-worker
+
+[Install]
+WantedBy=multi-user.target
+Also=temporal-server.service
+
+# Additional service dependencies can be added here:
+# After=vllm.service mcp-server.service
+# Wants=vllm.service mcp-server.service
