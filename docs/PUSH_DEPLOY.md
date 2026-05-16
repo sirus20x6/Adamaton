@@ -22,6 +22,44 @@ The workstation hosts a `registry:2` container on `10.0.4.37:5000`. Every Pi's d
 
 ## One-time bootstrap
 
+The fast path (recommended): `bin/adam bootstrap <host>` automates everything below from "Each Pi: trust the registry" through "Verify". Manual steps below remain authoritative for debugging or running each step in isolation.
+
+### Quick path
+
+```bash
+# Workstation: start the registry once (still manual):
+docker run -d --restart=unless-stopped --name adamaton-registry \
+  -p 5000:5000 -v adamaton-registry-data:/var/lib/registry registry:2
+
+# Workstation: bootstrap the agent on each Pi (idempotent — safe to re-run):
+bin/adam bootstrap pi5
+bin/adam bootstrap pi5-speaker
+bin/adam bootstrap blackwell
+
+# Workstation: switch each Pi off the bootstrap-tagged image onto a
+# proper registry-tagged build:
+bin/adam ship-self pi5
+bin/adam ship-self pi5-speaker
+bin/adam ship-self blackwell
+```
+
+What `bootstrap` does, in order:
+1. `ssh <host>.lan` reachability check (must be passwordless).
+2. Confirm workstation registry answers at `${WORKSTATION_IP}:5000/v2/_catalog`.
+3. Idempotent `/etc/docker/daemon.json` insecure-registry edit + `systemctl restart docker` (needs `sudo` on the host).
+4. Read or mint `DEPLOY_AGENT_TOKEN` on the Pi.
+5. Copy `image-tags.env.example` → `image-tags.env` if absent; pin `ADAMATON_DEPLOY_AGENT_TAG=bootstrap`.
+6. Build the agent locally (`--load`, arm64), `docker save | ssh docker load`.
+7. Retag locally on the Pi with the registry prefix so the compose image ref resolves.
+8. `docker compose up -d deploy-agent`, poll `/deploy/health` (30s).
+9. Append/update `~/.adamaton/ship.env` with the token + `WORKSTATION_IP`.
+
+After bootstrap, the agent is running on a **locally-loaded** image with tag `bootstrap` — not in the registry. Run `bin/adam ship-self <host>` to switch onto a registry-tagged build so subsequent `bin/adam ship` calls (which only know how to pull from the registry) can update it.
+
+### Manual bootstrap
+
+If you want to drive each step by hand (debugging the agent, custom on-host paths, etc.):
+
 ### Workstation: start the registry
 
 ```bash
