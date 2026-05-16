@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/migrate.sh — one-shot evo + deepresearch/platform -> Adamomaton bootstrap.
+# scripts/migrate.sh — one-shot evo + deepresearch/platform -> Adamaton bootstrap.
 #
 # Run from the umbrella root: ./scripts/migrate.sh [component]
 #   With no argument: runs for all components in DAG order.
@@ -9,7 +9,7 @@
 #   1. rsync the relevant evo paths into the sub-repo's working tree
 #      (excludes .git, leaves the sub-repo's existing README intact).
 #   2. Rewrite every .go file's imports:
-#        github.com/thearray/evo/<X> -> github.com/sirus20x6/adamomaton-<dest>/<X>
+#        github.com/thearray/evo/<X> -> github.com/sirus20x6/adamaton-<dest>/<X>
 #      using one sed pass per (old-prefix, new-prefix) pair.
 #   3. Rewrite each affected go.mod's module path + drop replace
 #      directives that pointed at relative evo paths.
@@ -34,20 +34,20 @@ DR_PLATFORM="${DR_PLATFORM:-/thearray/git/deepresearch/platform}"
 # Applied via sed to every .go file in every sub-repo.
 
 REWRITES=(
-    "github.com/thearray/evo/core github.com/sirus20x6/adamomaton-core"
-    "github.com/thearray/evo/skills-rae github.com/sirus20x6/adamomaton-knowledge/skills-rae"
-    "github.com/thearray/evo/skills github.com/sirus20x6/adamomaton-knowledge/skills"
-    "github.com/thearray/evo/reindex github.com/sirus20x6/adamomaton-knowledge/reindex"
-    "github.com/thearray/evo/r2g github.com/sirus20x6/adamomaton-knowledge/r2g"
-    "github.com/thearray/evo/nano-research github.com/sirus20x6/adamomaton-deepresearch/nano-research"
-    "github.com/thearray/evo/dashboard github.com/sirus20x6/adamomaton-platform/dashboard"
-    "github.com/thearray/evo/plugin-host github.com/sirus20x6/adamomaton-platform/plugin-host"
-    "github.com/thearray/evo/dispatch github.com/sirus20x6/adamomaton-platform/dispatch"
-    "github.com/thearray/evo/temporal github.com/sirus20x6/adamomaton-platform/temporal"
-    "github.com/thearray/evo/delegator github.com/sirus20x6/adamomaton-delegator/delegator"
-    "github.com/thearray/evo/mcp github.com/sirus20x6/adamomaton-delegator/mcp"
-    "github.com/thearray/evo/workflow-builder github.com/sirus20x6/adamomaton-evolve/workflow-builder"
-    "github.com/thearray/evo/evolve github.com/sirus20x6/adamomaton-evolve/evolve"
+    "github.com/thearray/evo/core github.com/sirus20x6/adamaton-core"
+    "github.com/thearray/evo/skills-rae github.com/sirus20x6/adamaton-knowledge/skills-rae"
+    "github.com/thearray/evo/skills github.com/sirus20x6/adamaton-knowledge/skills"
+    "github.com/thearray/evo/reindex github.com/sirus20x6/adamaton-knowledge/reindex"
+    "github.com/thearray/evo/r2g github.com/sirus20x6/adamaton-knowledge/r2g"
+    "github.com/thearray/evo/nano-research github.com/sirus20x6/adamaton-deepresearch/nano-research"
+    "github.com/thearray/evo/dashboard github.com/sirus20x6/adamaton-platform/dashboard"
+    "github.com/thearray/evo/plugin-host github.com/sirus20x6/adamaton-platform/plugin-host"
+    "github.com/thearray/evo/dispatch github.com/sirus20x6/adamaton-platform/dispatch"
+    "github.com/thearray/evo/temporal github.com/sirus20x6/adamaton-platform/temporal"
+    "github.com/thearray/evo/delegator github.com/sirus20x6/adamaton-delegator/delegator"
+    "github.com/thearray/evo/mcp github.com/sirus20x6/adamaton-delegator/mcp"
+    "github.com/thearray/evo/workflow-builder github.com/sirus20x6/adamaton-evolve/workflow-builder"
+    "github.com/thearray/evo/evolve github.com/sirus20x6/adamaton-evolve/evolve"
 )
 
 apply_rewrites_in() {
@@ -65,26 +65,26 @@ apply_rewrites_in() {
 # Canonical replace block appended to every depth-2 go.mod so cross-
 # component imports resolve via relative paths inside the umbrella
 # checkout. Go silently ignores replaces whose target isn't required,
-# so listing every adamomaton-* module in every depth-2 go.mod is safe.
+# so listing every adamaton-* module in every depth-2 go.mod is safe.
 # The umbrella's go.work is consulted first; this replace block is the
 # fallback for sub-repo standalone builds (broken until sibling sub-repos
 # are checked out at expected paths).
 REPLACE_BLOCK='
 replace (
-	github.com/sirus20x6/adamomaton-core => ../../core
-	github.com/sirus20x6/adamomaton-knowledge/skills => ../../knowledge/skills
-	github.com/sirus20x6/adamomaton-knowledge/skills-rae => ../../knowledge/skills-rae
-	github.com/sirus20x6/adamomaton-knowledge/reindex => ../../knowledge/reindex
-	github.com/sirus20x6/adamomaton-knowledge/r2g => ../../knowledge/r2g
-	github.com/sirus20x6/adamomaton-deepresearch/nano-research => ../../deepresearch/nano-research
-	github.com/sirus20x6/adamomaton-delegator/delegator => ../../delegator/delegator
-	github.com/sirus20x6/adamomaton-delegator/mcp => ../../delegator/mcp
-	github.com/sirus20x6/adamomaton-evolve/evolve => ../../evolve/evolve
-	github.com/sirus20x6/adamomaton-evolve/workflow-builder => ../../evolve/workflow-builder
-	github.com/sirus20x6/adamomaton-platform/dashboard => ../../platform/dashboard
-	github.com/sirus20x6/adamomaton-platform/plugin-host => ../../platform/plugin-host
-	github.com/sirus20x6/adamomaton-platform/dispatch => ../../platform/dispatch
-	github.com/sirus20x6/adamomaton-platform/temporal => ../../platform/temporal
+	github.com/sirus20x6/adamaton-core => ../../core
+	github.com/sirus20x6/adamaton-knowledge/skills => ../../knowledge/skills
+	github.com/sirus20x6/adamaton-knowledge/skills-rae => ../../knowledge/skills-rae
+	github.com/sirus20x6/adamaton-knowledge/reindex => ../../knowledge/reindex
+	github.com/sirus20x6/adamaton-knowledge/r2g => ../../knowledge/r2g
+	github.com/sirus20x6/adamaton-deepresearch/nano-research => ../../deepresearch/nano-research
+	github.com/sirus20x6/adamaton-delegator/delegator => ../../delegator/delegator
+	github.com/sirus20x6/adamaton-delegator/mcp => ../../delegator/mcp
+	github.com/sirus20x6/adamaton-evolve/evolve => ../../evolve/evolve
+	github.com/sirus20x6/adamaton-evolve/workflow-builder => ../../evolve/workflow-builder
+	github.com/sirus20x6/adamaton-platform/dashboard => ../../platform/dashboard
+	github.com/sirus20x6/adamaton-platform/plugin-host => ../../platform/plugin-host
+	github.com/sirus20x6/adamaton-platform/dispatch => ../../platform/dispatch
+	github.com/sirus20x6/adamaton-platform/temporal => ../../platform/temporal
 )'
 
 # Rewrite a single go.mod: module path, drop relative-path replaces.
@@ -100,20 +100,20 @@ rewrite_gomod() {
         new="${pair#* }"
         sed -i "s|${old}|${new}|g" "$gomod"
     done
-    # 3. Drop `replace github.com/sirus20x6/adamomaton-* => ../...` lines,
+    # 3. Drop `replace github.com/sirus20x6/adamaton-* => ../...` lines,
     # both single-line and inside `replace ( ... )` blocks.
     # The umbrella's go.work resolves these via the workspace; standalone
     # checkouts get added back via per-sub-repo CI overrides (Phase 5).
-    sed -i '/^replace github\.com\/sirus20x6\/adamomaton-/d' "$gomod"
-    sed -i '/^replace ($/,/^)$/{/sirus20x6\/adamomaton-/d}' "$gomod"
+    sed -i '/^replace github\.com\/sirus20x6\/adamaton-/d' "$gomod"
+    sed -i '/^replace ($/,/^)$/{/sirus20x6\/adamaton-/d}' "$gomod"
     # 4. Drop empty replace blocks (e.g. "replace (" immediately followed by ")").
     sed -i '/^replace ($/{N;/^replace (\n)$/d}' "$gomod"
     # 5. Depth-2 go.mods (under a sub-repo's nested module dir) get the
     # canonical replace block for cross-component resolution. Skip for
-    # core/go.mod (depth 1; it has no internal adamomaton-* deps).
+    # core/go.mod (depth 1; it has no internal adamaton-* deps).
     local depth
     depth=$(echo "$gomod" | tr '/' '\n' | wc -l)
-    if [[ "$depth" -ge 4 ]]; then  # /thearray/git/Adamomaton/X/Y/go.mod -> 6 components; we want >=4 from sub-repo root
+    if [[ "$depth" -ge 4 ]]; then  # /thearray/git/Adamaton/X/Y/go.mod -> 6 components; we want >=4 from sub-repo root
         echo "$REPLACE_BLOCK" >> "$gomod"
     fi
 }
@@ -127,7 +127,7 @@ migrate_core() {
     rsync -a --delete --exclude=.git --exclude=README.md \
         "$EVO/core/" "$ADAM_ROOT/core/"
     apply_rewrites_in "$ADAM_ROOT/core"
-    rewrite_gomod "$ADAM_ROOT/core/go.mod" "github.com/sirus20x6/adamomaton-core"
+    rewrite_gomod "$ADAM_ROOT/core/go.mod" "github.com/sirus20x6/adamaton-core"
 }
 
 migrate_evolve() {
@@ -138,9 +138,9 @@ migrate_evolve() {
         "$EVO/workflow-builder/" "$ADAM_ROOT/evolve/workflow-builder/"
     apply_rewrites_in "$ADAM_ROOT/evolve"
     rewrite_gomod "$ADAM_ROOT/evolve/evolve/go.mod" \
-        "github.com/sirus20x6/adamomaton-evolve/evolve"
+        "github.com/sirus20x6/adamaton-evolve/evolve"
     rewrite_gomod "$ADAM_ROOT/evolve/workflow-builder/go.mod" \
-        "github.com/sirus20x6/adamomaton-evolve/workflow-builder"
+        "github.com/sirus20x6/adamaton-evolve/workflow-builder"
 }
 
 migrate_knowledge() {
@@ -157,13 +157,13 @@ migrate_knowledge() {
     done
     apply_rewrites_in "$ADAM_ROOT/knowledge"
     rewrite_gomod "$ADAM_ROOT/knowledge/skills/go.mod" \
-        "github.com/sirus20x6/adamomaton-knowledge/skills"
+        "github.com/sirus20x6/adamaton-knowledge/skills"
     rewrite_gomod "$ADAM_ROOT/knowledge/skills-rae/go.mod" \
-        "github.com/sirus20x6/adamomaton-knowledge/skills-rae"
+        "github.com/sirus20x6/adamaton-knowledge/skills-rae"
     rewrite_gomod "$ADAM_ROOT/knowledge/reindex/go.mod" \
-        "github.com/sirus20x6/adamomaton-knowledge/reindex"
+        "github.com/sirus20x6/adamaton-knowledge/reindex"
     rewrite_gomod "$ADAM_ROOT/knowledge/r2g/go.mod" \
-        "github.com/sirus20x6/adamomaton-knowledge/r2g"
+        "github.com/sirus20x6/adamaton-knowledge/r2g"
 }
 
 migrate_deepresearch() {
@@ -172,7 +172,7 @@ migrate_deepresearch() {
         "$EVO/nano-research/" "$ADAM_ROOT/deepresearch/nano-research/"
     apply_rewrites_in "$ADAM_ROOT/deepresearch"
     rewrite_gomod "$ADAM_ROOT/deepresearch/nano-research/go.mod" \
-        "github.com/sirus20x6/adamomaton-deepresearch/nano-research"
+        "github.com/sirus20x6/adamaton-deepresearch/nano-research"
 }
 
 migrate_delegator() {
@@ -183,9 +183,9 @@ migrate_delegator() {
     done
     apply_rewrites_in "$ADAM_ROOT/delegator"
     rewrite_gomod "$ADAM_ROOT/delegator/delegator/go.mod" \
-        "github.com/sirus20x6/adamomaton-delegator/delegator"
+        "github.com/sirus20x6/adamaton-delegator/delegator"
     rewrite_gomod "$ADAM_ROOT/delegator/mcp/go.mod" \
-        "github.com/sirus20x6/adamomaton-delegator/mcp"
+        "github.com/sirus20x6/adamaton-delegator/mcp"
 }
 
 migrate_platform() {
@@ -201,13 +201,13 @@ migrate_platform() {
     fi
     apply_rewrites_in "$ADAM_ROOT/platform"
     rewrite_gomod "$ADAM_ROOT/platform/dashboard/go.mod" \
-        "github.com/sirus20x6/adamomaton-platform/dashboard"
+        "github.com/sirus20x6/adamaton-platform/dashboard"
     rewrite_gomod "$ADAM_ROOT/platform/plugin-host/go.mod" \
-        "github.com/sirus20x6/adamomaton-platform/plugin-host"
+        "github.com/sirus20x6/adamaton-platform/plugin-host"
     rewrite_gomod "$ADAM_ROOT/platform/dispatch/go.mod" \
-        "github.com/sirus20x6/adamomaton-platform/dispatch"
+        "github.com/sirus20x6/adamaton-platform/dispatch"
     rewrite_gomod "$ADAM_ROOT/platform/temporal/go.mod" \
-        "github.com/sirus20x6/adamomaton-platform/temporal"
+        "github.com/sirus20x6/adamaton-platform/temporal"
 }
 
 migrate_frontend() {

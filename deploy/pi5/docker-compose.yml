@@ -1,8 +1,8 @@
-# deploy/pi5/docker-compose.yml — main Adamomaton stack (Raspberry Pi 5, arm64).
+# deploy/pi5/docker-compose.yml — main Adamaton stack (Raspberry Pi 5, arm64).
 #
 # Source of truth ported from pi5:~/deepresearch/docker-compose.yml (the live
 # production compose) on 2026-05-16, with image names rewritten to the
-# adamomaton-<component>:<umbrella-sha-short> convention. The umbrella SHA is
+# adamaton-<component>:<umbrella-sha-short> convention. The umbrella SHA is
 # substituted at deploy time by up.sh via the IMAGE_TAG env var.
 #
 # Services:
@@ -107,7 +107,7 @@ services:
 
   # ---- knowledge sub-repo --------------------------------------------------
   r2g:
-    image: adamomaton-r2g:${IMAGE_TAG:-dev}
+    image: adamaton-r2g:${IMAGE_TAG:-dev}
     environment:
       R2G_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       R2G_PORT: "7373"
@@ -132,7 +132,7 @@ services:
     restart: unless-stopped
 
   skills-rae:
-    image: adamomaton-skills-rae:${IMAGE_TAG:-dev}
+    image: adamaton-skills-rae:${IMAGE_TAG:-dev}
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       SKILLS_RAE_PORT: "7376"
@@ -152,7 +152,7 @@ services:
     restart: unless-stopped
 
   skills-rae-worker:
-    image: adamomaton-skills-rae-worker:${IMAGE_TAG:-dev}
+    image: adamaton-skills-rae-worker:${IMAGE_TAG:-dev}
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
@@ -171,7 +171,7 @@ services:
 
   skills-worker:
     hostname: pi
-    image: adamomaton-skills-worker:${IMAGE_TAG:-dev}
+    image: adamaton-skills-worker:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
@@ -191,7 +191,7 @@ services:
 
   reindex-worker:
     hostname: pi
-    image: adamomaton-reindex-worker:${IMAGE_TAG:-dev}
+    image: adamaton-reindex-worker:${IMAGE_TAG:-dev}
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
@@ -211,7 +211,7 @@ services:
   reranker:
     # Python sidecar — image still built by the legacy platform/reranker
     # context. Keeping the old name until cross-compile pipeline ships
-    # an adamomaton-reranker variant.
+    # an adamaton-reranker variant.
     image: evo-reranker:dev
     environment:
       RERANKER_MODEL: cross-encoder/ms-marco-MiniLM-L-6-v2
@@ -224,7 +224,7 @@ services:
 
   # ---- deepresearch sub-repo ----------------------------------------------
   nano-research:
-    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    image: adamaton-nano-research:${IMAGE_TAG:-dev}
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       NANO_RESEARCH_PORT: "7378"
@@ -246,7 +246,7 @@ services:
     restart: unless-stopped
 
   nano-research-worker:
-    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    image: adamaton-nano-research:${IMAGE_TAG:-dev}
     entrypoint: ["/usr/local/bin/nano-research-worker"]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -271,7 +271,7 @@ services:
     restart: unless-stopped
 
   figure-renderer:
-    image: adamomaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    image: adamaton-nano-figure-renderer:${IMAGE_TAG:-dev}
     expose:
       - "8090"
     restart: unless-stopped
@@ -281,7 +281,7 @@ services:
     init: true
     # Python R2R backend. Still built from the platform sub-repo until the
     # planned platform/backend → Go cutover lands.
-    image: adamomaton-platform-backend:${IMAGE_TAG:-dev}
+    image: adamaton-platform-backend:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       R2R_CONFIG_PATH: /app/configs/platform.toml
@@ -315,7 +315,7 @@ services:
     restart: unless-stopped
 
   worker-lo:
-    image: adamomaton-platform-backend:${IMAGE_TAG:-dev}
+    image: adamaton-platform-backend:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       R2R_CONFIG_PATH: /app/configs/platform.toml
@@ -338,7 +338,7 @@ services:
     restart: unless-stopped
 
   plugin-host:
-    image: adamomaton-plugin-host:${IMAGE_TAG:-dev}
+    image: adamaton-plugin-host:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       PH_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -359,7 +359,7 @@ services:
 
   dispatch-worker:
     hostname: pi
-    image: adamomaton-dispatch-worker:${IMAGE_TAG:-dev}
+    image: adamaton-dispatch-worker:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
@@ -374,7 +374,7 @@ services:
     restart: unless-stopped
 
   evo-api:
-    image: adamomaton-evo-api:${IMAGE_TAG:-dev}
+    image: adamaton-evo-api:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -404,7 +404,7 @@ services:
   # ---- evolve sub-repo ----------------------------------------------------
   evo-worker:
     hostname: pi
-    image: adamomaton-evo-worker:${IMAGE_TAG:-dev}
+    image: adamaton-evo-worker:${IMAGE_TAG:-dev}
     env_file: [.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233

@@ -1,4 +1,4 @@
-// Adamomaton umbrella go.work — aggregates every Go module across all
+// Adamaton umbrella go.work — aggregates every Go module across all
 // submodules so local dev resolves cross-component imports via paths
 // instead of network module fetches.
 //

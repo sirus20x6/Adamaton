@@ -1,4 +1,4 @@
-# deploy/pi5/Caddyfile — Adamomaton edge reverse proxy.
+# deploy/pi5/Caddyfile — Adamaton edge reverse proxy.
 #
 # Ported verbatim from pi5:~/deepresearch/infra/Caddyfile on 2026-05-16.
 # Routes to upstream Go services and the Python platform backend; the SPA

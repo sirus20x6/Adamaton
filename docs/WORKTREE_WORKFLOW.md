@@ -49,7 +49,7 @@ bin/adam release cross/llmclient-streaming
   "scope":     "platform",
   "task":      "dashboard-pagination",
   "branch":    "sirus/dashboard-pagination",
-  "worktree":  "/thearray/git/Adamomaton/platform/platform-worktrees/sirus-dashboard-pagination",
+  "worktree":  "/thearray/git/Adamaton/platform/platform-worktrees/sirus-dashboard-pagination",
   "paths":     ["platform/dashboard/apiserver/**"],
   "started_at":"2026-05-16T13:42:00Z"
 }

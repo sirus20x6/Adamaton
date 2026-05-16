@@ -1,4 +1,4 @@
-# Adamomaton umbrella .gitignore.
+# Adamaton umbrella .gitignore.
 #
 # Worktrees (umbrella-level + per-submodule) are local-only.
 # .locks/*.json are tracked (concurrent claims need to be visible);
