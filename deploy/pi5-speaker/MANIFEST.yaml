@@ -7,3 +7,4 @@ image_tag: "main"
 services:
   - nano-research-worker
   - figure-renderer
+  - deploy-agent
