@@ -1,0 +1,13 @@
+// Adamomaton umbrella go.work — aggregates every Go module across all
+// submodules so local dev resolves cross-component imports via paths
+// instead of network module fetches.
+//
+// Phase 2 (scripts/migrate.sh) populates the `use` directives once each
+// sub-repo holds real code. Until then this file is the empty workspace
+// declaration that lets `go work sync` run from the umbrella root
+// without complaint.
+//
+// Production builds (sub-repo CI without the umbrella) resolve
+// dependencies via each go.mod's pinned tag.
+
+go 1.25

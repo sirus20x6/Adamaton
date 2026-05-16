@@ -1,0 +1,21 @@
+[submodule "core"]
+	path = core
+	url = git@github.com:sirus20x6/adamomaton-core.git
+[submodule "frontend"]
+	path = frontend
+	url = git@github.com:sirus20x6/adamomaton-frontend.git
+[submodule "knowledge"]
+	path = knowledge
+	url = git@github.com:sirus20x6/adamomaton-knowledge.git
+[submodule "deepresearch"]
+	path = deepresearch
+	url = git@github.com:sirus20x6/adamomaton-deepresearch.git
+[submodule "platform"]
+	path = platform
+	url = git@github.com:sirus20x6/adamomaton-platform.git
+[submodule "delegator"]
+	path = delegator
+	url = git@github.com:sirus20x6/adamomaton-delegator.git
+[submodule "evolve"]
+	path = evolve
+	url = git@github.com:sirus20x6/adamomaton-evolve.git

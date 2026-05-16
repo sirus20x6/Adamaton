@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Adamomaton pre-commit hook. Installed by `bin/adam sync-hooks`.
+#
+# Enforces:
+#   1. No `Co-Authored-By:` trailers in the commit message (forks
+#      propagate the mention forever — credit via PR description).
+#   2. No `claude.ai` or `noreply@anthropic.com` strings anywhere in
+#      the staged diff (commit content stays attributable to the human).
+#   3. gofmt -l on staged .go files (non-empty result fails).
+
+set -euo pipefail
+
+# Try to source the umbrella's hooks lib; ok if it's missing (the hook
+# still works without lockfile lookups).
+UMBRELLA="$(cd "$(git rev-parse --show-toplevel)" && {
+    d="$(pwd)"
+    while [[ "$d" != "/" ]]; do
+        if [[ -f "$d/.gitmodules" && -d "$d/hooks" ]]; then echo "$d"; break; fi
+        d="$(dirname "$d")"
+    done
+} || true)"
+if [[ -n "${UMBRELLA:-}" && -f "$UMBRELLA/hooks/lib/lib.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "$UMBRELLA/hooks/lib/lib.sh"
+fi
+
+# Rule 1 — Co-Authored-By rejection (commit message file passed via
+# COMMIT_EDITMSG; pre-commit doesn't see it directly, so we hand off
+# to commit-msg for the message check. Here we only guard the diff
+# content for AI-attribution strings.)
+
+# Rule 2 — diff content.
+if git diff --cached --diff-filter=ACMR -- | grep -aiE "(claude\.ai|noreply@anthropic\.com)" >/dev/null 2>&1; then
+    printf "\033[31m" >&2
+    echo "adam pre-commit: blocked — staged diff contains 'claude.ai' or 'noreply@anthropic.com'." >&2
+    printf "\033[0m" >&2
+    echo "                These strings are reserved for the (rejected) Co-Authored-By trailer pattern." >&2
+    exit 1
+fi
+
+# Rule 3 — gofmt.
+go_files="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.go$' || true)"
+if [[ -n "$go_files" ]]; then
+    unformatted="$(echo "$go_files" | xargs -r gofmt -l 2>/dev/null || true)"
+    if [[ -n "$unformatted" ]]; then
+        printf "\033[31m" >&2
+        echo "adam pre-commit: blocked — these files need gofmt:" >&2
+        echo "$unformatted" | sed 's/^/  /' >&2
+        printf "\033[0m" >&2
+        echo "                Run: gofmt -w <file>" >&2
+        exit 1
+    fi
+fi

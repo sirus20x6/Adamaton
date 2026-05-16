@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Adamomaton pre-push hook. Installed by `bin/adam sync-hooks`.
+#
+# Enforces:
+#   1. Refuse `git push --force` to main/master.
+#   2. Warn (soft) when pushing a branch claimed by a different agent
+#      per the umbrella's .locks/. 5-second sleep gives time to Ctrl-C.
+#
+# Reads stdin per git's pre-push protocol:
+#   <local ref> <local sha> <remote ref> <remote sha>
+
+set -euo pipefail
+
+# Find umbrella for lockfile lookups (best-effort).
+UMBRELLA="$(d="$(pwd)"; while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/.gitmodules" && -d "$d/hooks" && -d "$d/.locks" ]]; then echo "$d"; break; fi
+    d="$(dirname "$d")"
+done || true)"
+
+current_agent="${ADAM_AGENT:-$(git config user.name 2>/dev/null || whoami)}"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    branch="${remote_ref#refs/heads/}"
+
+    # Rule 1 — refuse --force to main/master.
+    # GIT_PUSH_OPTION_COUNT is set when --push-option is used; for --force
+    # detection we look at the local SHA history vs remote — if the remote
+    # SHA is not reachable from the local SHA, this is a non-fast-forward
+    # (i.e. a force push).
+    if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+        if [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
+            if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+                printf "\033[31m" >&2
+                echo "adam pre-push: blocked — non-fast-forward push to $branch (force-push detected)." >&2
+                printf "\033[0m" >&2
+                echo "               Refusing. If you really need this, push to a different branch and open a PR." >&2
+                exit 1
+            fi
+        fi
+    fi
+
+    # Rule 2 — soft warn on foreign-claimed branches.
+    if [[ -n "${UMBRELLA:-}" ]]; then
+        owner=""
+        for f in "$UMBRELLA"/.locks/*.json; do
+            [[ -e "$f" ]] || continue
+            lock_branch="$(grep -E '"branch"' "$f" | sed -E 's/.*"branch" *: *"([^"]+)".*/\1/')"
+            if [[ "$lock_branch" == "$branch" ]]; then
+                owner="$(grep -E '"agent"' "$f" | sed -E 's/.*"agent" *: *"([^"]+)".*/\1/')"
+                break
+            fi
+        done
+        if [[ -n "$owner" && "$owner" != "$current_agent" ]]; then
+            printf "\033[33m" >&2
+            echo "adam pre-push: warning — branch '$branch' is claimed by '$owner', not '$current_agent'." >&2
+            printf "\033[0m" >&2
+            echo "               Sleeping 5s; Ctrl-C to abort."   >&2
+            sleep 5
+        fi
+    fi
+done
