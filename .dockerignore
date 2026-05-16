@@ -1,13 +1,18 @@
 .git
 **/node_modules
 **/.next
-**/dist
 **/build
 **/*.log
 **/.venv
-deepresearch
+# NOTE: do NOT exclude 'deepresearch' here. It looks like a vendor dir
+# from the old evo monorepo (where it was an upstream submodule) but in
+# Adamaton it's a first-class sub-repo whose Go modules are imported by
+# the dashboard build. Excluding it breaks `bin/adam ship evo-api`.
 ui/dist
 ui/node_modules
 dashboard/ui/dist
 dashboard/ui/node_modules
 mcp/node_modules
+# Per-sub-repo frontend dist dirs — large + regenerated on every build.
+frontend/dist
+frontend/.vite
