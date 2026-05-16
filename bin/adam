@@ -660,11 +660,14 @@ host_https_alias() {
 }
 
 # host_deploy_url <host>: base URL for the deploy-agent (no trailing
-# slash). Defaults to http://<ssh_alias>:9128 because not every host
+# slash). Defaults to http://<mdns_alias>:9128 because not every host
 # runs Caddy (pi5-speaker doesn't), and the bearer token is already
 # the security boundary -- TLS adds no auth value over LAN-internal
-# HTTP. Override with HOST_DEPLOY_URL_<UPPER> in ship.env when a host
-# fronts the agent through HTTPS.
+# HTTP. Uses host_https_alias (mDNS .local by default, or the
+# HOST_HTTPS_<H> override) for the hostname because ssh aliases from
+# ~/.ssh/config aren't DNS-resolvable for curl. Override the whole URL
+# with HOST_DEPLOY_URL_<UPPER> in ship.env when a host fronts the agent
+# through HTTPS (e.g. https://deepresearch.local/deploy).
 host_deploy_url() {
     local h="$1" key target
     key="HOST_DEPLOY_URL_$(echo "$h" | tr 'a-z-' 'A-Z_')"
@@ -672,7 +675,7 @@ host_deploy_url() {
         echo "${!key}"
         return
     fi
-    target=$(host_ssh_alias "$h")
+    target=$(host_https_alias "$h")
     echo "http://${target}:9128"
 }
 
