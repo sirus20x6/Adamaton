@@ -1,0 +1,35 @@
+# Pi #1 (pi5) — main Adamaton stack image manifest.
+#
+# Single source of truth for what image_tag this host runs. Updated by:
+#   bin/adam fleet promote <sha-or-tag>     # updates this + all peer MANIFESTs
+#   (manual edit + commit)                  # for per-host canaries
+#
+# Consumed by:
+#   bin/adam fleet pull pi5                 # ssh + IMAGE_TAG=<tag> docker compose pull + up -d
+#   deploy/pi5/up.sh                        # exports IMAGE_TAG before docker compose
+#
+# Tag forms:
+#   "main"           — always-latest from origin/main (auto-rolls on push)
+#   "sha-abc1234"    — immutable, reproducible (preferred for production)
+#   "v0.2.0"         — semver tag (cut by `gh release create v0.2.0` on a sub-repo)
+
+host: pi5
+image_tag: "main"
+
+# Services that ship as adamaton-<service> images on this host.
+# Image refs in docker-compose.yml are: adamaton-<service>:${IMAGE_TAG}
+services:
+  - skills-rae
+  - r2g
+  - reindex-worker
+  - skills-worker
+  - reranker
+  - nano-research
+  - nano-research-worker
+  - figure-renderer
+  - dashboard
+  - plugin-host
+  - dispatch-worker
+  - temporal-worker
+  - evo-worker
+  - frontend

@@ -1,0 +1,9 @@
+# Pi #2 (pi5-speaker) — replica node manifest.
+# See deploy/pi5/MANIFEST.yaml for the tag-form convention.
+
+host: pi5-speaker
+image_tag: "main"
+
+services:
+  - nano-research-worker
+  - figure-renderer

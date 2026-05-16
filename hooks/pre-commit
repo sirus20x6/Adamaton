@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Adamomaton pre-commit hook. Installed by `bin/adam sync-hooks`.
+# Adamaton pre-commit hook. Installed by `bin/adam sync-hooks`.
 #
 # Enforces:
+#   0. (BLOCKING) No commits on main/master from the canonical checkout.
+#      Agents must `bin/adam claim <scope>/<task>` first, work in the
+#      created worktree on a feature branch, then push the branch + open
+#      a PR. The only exception is when ADAM_BUMP=1 is set in the env —
+#      `bin/adam bump` uses this to land legitimate submodule pin
+#      advances on main.
 #   1. No `Co-Authored-By:` trailers in the commit message (forks
 #      propagate the mention forever — credit via PR description).
 #   2. No `claude.ai` or `noreply@anthropic.com` strings anywhere in
@@ -22,6 +28,31 @@ UMBRELLA="$(cd "$(git rev-parse --show-toplevel)" && {
 if [[ -n "${UMBRELLA:-}" && -f "$UMBRELLA/hooks/lib/lib.sh" ]]; then
     # shellcheck source=/dev/null
     . "$UMBRELLA/hooks/lib/lib.sh"
+fi
+
+# Rule 0 — block direct commits to main/master from the canonical
+# checkout. Worktrees are exempt (they're already on a feature branch).
+# `bin/adam bump` sets ADAM_BUMP=1 to land submodule-pin advances; any
+# other ad-hoc commit on main is rejected.
+branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || echo HEAD)"
+top="$(git rev-parse --show-toplevel)"
+in_worktree=0
+case "$top" in
+    *-worktrees/*|*/worktrees/*) in_worktree=1 ;;
+esac
+if [[ "${ADAM_BUMP:-}" != "1" && "$in_worktree" -eq 0 && ( "$branch" == "main" || "$branch" == "master" ) ]]; then
+    printf "\033[31m" >&2
+    echo "adam pre-commit: BLOCKED — direct commit to '$branch' from the canonical checkout." >&2
+    printf "\033[0m" >&2
+    echo "                 Agents must work on a feature branch via:" >&2
+    echo "                   bin/adam claim <scope>/<task>" >&2
+    echo "                   cd <returned-worktree-path>" >&2
+    echo "                 If you accidentally edited main, run:" >&2
+    echo "                   bin/adam rescue" >&2
+    echo "                 (Submodule pin bumps via 'bin/adam bump' are the only" >&2
+    echo "                  legitimate path; that command sets ADAM_BUMP=1 to skip" >&2
+    echo "                  this check.)" >&2
+    exit 1
 fi
 
 # Rule 1 — Co-Authored-By rejection (commit message file passed via

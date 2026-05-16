@@ -1,0 +1,12 @@
+# Blackwell — GPU node manifest.
+# See deploy/pi5/MANIFEST.yaml for the tag-form convention.
+#
+# Note: vLLM image is upstream (vllm/vllm-openai), not built by us. Only
+# evo-worker-kernel + distill-trainer are adamaton-* images here.
+
+host: blackwell
+image_tag: "main"
+
+services:
+  - evo-worker          # KernelBench candidate evaluator on CUDA
+  - distill-trainer     # DPO+LoRA trainer (gated behind --profile=train)
