@@ -124,8 +124,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/sirus/Adamaton-deploy:/home/sirus/Adamaton-deploy
-    expose:
-      - "9128"
+    ports:
+      # LAN-direct. bin/adam ship uses http://<host>:9128 instead of going
+      # through Caddy/HTTPS -- pi5-speaker has no Caddy edge, and the
+      # bearer token is the security boundary anyway. Firewall the
+      # 10.0.4.x subnet at the gateway, not here.
+      - "9128:9128"
     restart: unless-stopped
 
 volumes:
