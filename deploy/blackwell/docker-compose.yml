@@ -1,0 +1,101 @@
+# deploy/blackwell/docker-compose.yml — GPU node (amd64 + NVIDIA).
+#
+# Hosts:
+#   - vllm                — Qwen3.6-27b-nvfp8 OpenAI-compatible server with
+#                           --enable-lora for distill LoRA hot-swaps
+#   - evo-worker-kernel   — extra Temporal worker pinned to the KernelBench
+#                           queue, reaches back to pi5's Temporal + Postgres
+#                           and dispatches kernel evals to the LOCAL CUDA
+#                           runtime (EVO_KERNEL_REMOTE_HOST="" means "run
+#                           here" per evolve/activities/evaluate.go)
+#   - distill-trainer     — manual-trigger trainer container (profile=train)
+#
+# Backing services (postgres, temporal, skills-rae) all live on pi5; this
+# stack stays narrow on purpose -- the GPU is the scarce resource.
+#
+# Prereqs: NVIDIA driver + nvidia-container-toolkit installed on the host;
+# /srv/checkpoints exists for vLLM HF cache + distill output.
+
+services:
+  vllm:
+    # Pinned to the same upstream image used today; the exact tag is bumped
+    # in .env per release.
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      HF_HOME: /root/.cache/huggingface
+    command:
+      - "--model=${VLLM_MODEL:-Qwen/Qwen3-VL-30B-A3B-Instruct-FP8}"
+      - "--served-model-name=${VLLM_SERVED_MODEL:-qwen3.6-27b-nvfp8}"
+      - "--port=9080"
+      - "--host=0.0.0.0"
+      - "--enable-lora"
+      - "--max-loras=${VLLM_MAX_LORAS:-4}"
+      - "--max-lora-rank=${VLLM_MAX_LORA_RANK:-64}"
+      - "--max-model-len=${VLLM_MAX_MODEL_LEN:-32768}"
+      - "--gpu-memory-utilization=${VLLM_GPU_MEM_UTIL:-0.90}"
+    ports:
+      - "9080:9080"
+    volumes:
+      - ${HF_CACHE_DIR:-/srv/checkpoints/hf}:/root/.cache/huggingface
+      - ${LORA_DIR:-/srv/checkpoints/lora}:/loras:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 600s
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    restart: unless-stopped
+
+  evo-worker-kernel:
+    image: adamomaton-evo-worker:${IMAGE_TAG:-dev}
+    hostname: blackwell
+    env_file: [.env]
+    environment:
+      TEMPORAL_ADDRESS: ${PI1_HOST:-10.0.4.30}:7233
+      TEMPORAL_NAMESPACE: default
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST:-10.0.4.30}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      EVO_TASK_QUEUE: ${EVO_KERNEL_TASK_QUEUE:-evo-kernel}
+      DEEPRESEARCH_URL: http://${PI1_HOST:-10.0.4.30}:7272
+      LOG_LEVEL: info
+      # Empty => kernel evals execute LOCALLY in this container's CUDA
+      # runtime (see evolve/activities/evaluate.go RemoteHost field).
+      EVO_KERNEL_REMOTE_HOST: ""
+      # vLLM endpoint for the evo-worker's own LLM-driven mutation prompts.
+      OPENAI_API_BASE: http://vllm:9080/v1
+      EVO_LLM_MODEL: ${VLLM_SERVED_MODEL:-qwen3.6-27b-nvfp8}
+    runtime: nvidia
+    # Kernel evals compile and run small CUDA programs in /tmp/kernelbench.
+    # We expose the full GPU set; the activity sets CUDA_VISIBLE_DEVICES
+    # per-eval (see evolve/evaluator/kernel/run.py).
+    depends_on:
+      vllm:
+        condition: service_healthy
+    volumes:
+      - kernelbench_scratch:/tmp/kernelbench
+    restart: unless-stopped
+
+  distill-trainer:
+    image: adamomaton-distill-trainer:${IMAGE_TAG:-dev}
+    # Manual trigger only -- `docker compose --profile train up distill-trainer`.
+    profiles: [train]
+    runtime: nvidia
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST:-10.0.4.30}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      BASE_MODEL: ${VLLM_MODEL:-Qwen/Qwen3-VL-30B-A3B-Instruct-FP8}
+      HF_HOME: /root/.cache/huggingface
+      OUTPUT_DIR: /srv/checkpoints/distill
+      WANDB_API_KEY: ${WANDB_API_KEY:-}
+    volumes:
+      - ${HF_CACHE_DIR:-/srv/checkpoints/hf}:/root/.cache/huggingface
+      - ${LORA_DIR:-/srv/checkpoints/lora}:/loras
+      - ${DISTILL_OUTPUT_DIR:-/srv/checkpoints/distill}:/srv/checkpoints/distill
+    restart: "no"
+
+volumes:
+  kernelbench_scratch:

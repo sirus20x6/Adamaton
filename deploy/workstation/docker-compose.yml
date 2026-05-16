@@ -1,0 +1,68 @@
+# deploy/workstation/docker-compose.yml — local dev backing services only.
+#
+# Brings up just postgres + temporal-dev so the operator can iterate on Go
+# workers with `go run ./cmd/<worker>` from each sub-repo. NO worker
+# containers are started by this compose -- the workstation's job is to host
+# the binaries you're actively hacking on.
+#
+# Image choice notes:
+#   - postgres: pgvector/pgvector:pg16 so the local schema matches the Pi.
+#     Host port is 5433 to avoid colliding with a system postgres on 5432.
+#   - temporal: temporalio/temporal:1.27 in dev (in-memory persistence) so
+#     starting a workflow doesn't need a separate db. Production temporal on
+#     the Pi uses postgres12 persistence.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: adamomaton-workstation-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - workstation_pg_data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=256
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=32MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  temporal-dev:
+    # Bundled SQLite persistence -- zero external deps, restart wipes state.
+    # Switch to temporalio/auto-setup against the postgres above only if you
+    # need cross-restart persistence on the workstation.
+    image: temporalio/temporal:1.27
+    container_name: adamomaton-workstation-temporal
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --http-port
+      - "7234"
+      - --ui-port
+      - "8233"
+      - --namespace
+      - default
+    ports:
+      - "7233:7233"  # gRPC frontend
+      - "7234:7234"  # HTTP API
+      - "8233:8233"  # Temporal Web UI
+    restart: unless-stopped
+
+volumes:
+  workstation_pg_data:
