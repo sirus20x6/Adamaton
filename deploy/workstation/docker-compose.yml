@@ -15,7 +15,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: adamomaton-workstation-postgres
+    container_name: adamaton-workstation-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -44,7 +44,7 @@ services:
     # Switch to temporalio/auto-setup against the postgres above only if you
     # need cross-restart persistence on the workstation.
     image: temporalio/temporal:1.27
-    container_name: adamomaton-workstation-temporal
+    container_name: adamaton-workstation-temporal
     command:
       - server
       - start-dev

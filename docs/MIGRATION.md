@@ -1,4 +1,4 @@
-# Migration log: evo → Adamomaton
+# Migration log: evo → Adamaton
 
 Bootstrapped on 2026-05-16. Old evo repo archived to read-only at `sirus20x6/evo-archive` for `git blame` archaeology; active code now lives across the 7 sub-repos under this umbrella.
 
@@ -6,7 +6,7 @@ Bootstrapped on 2026-05-16. Old evo repo archived to read-only at `sirus20x6/evo
 
 | Phase | Status | Notes |
 |---|---|---|
-| **P0** | done (2026-05-16) | Pre-split refactor inside evo. Two cross-component imports eliminated: `core/octen` carved out of `delegator/contextmode`, `core/executor/cli` carved out of `workflow-builder/executor`. Branch `adamomaton-p0` merged to evo main (commits `b7817e6`, `36094ea`). |
+| **P0** | done (2026-05-16) | Pre-split refactor inside evo. Two cross-component imports eliminated: `core/octen` carved out of `delegator/contextmode`, `core/executor/cli` carved out of `workflow-builder/executor`. Branch `adamaton-p0` merged to evo main (commits `b7817e6`, `36094ea`). |
 | **P1** | in progress (2026-05-16) | Bootstrap umbrella + 7 sub-repos. 8 GitHub repos created; submodules wired; bin/adam, hooks, docs, deploy skeletons in place. |
 | **P2** | pending | scripts/migrate.sh + per-component code copy + import path rewrite. |
 | **P3** | pending | Umbrella go.work + cross-repo build verification. |
@@ -29,16 +29,16 @@ Verification: all 12 Go modules build; `go vet` clean on the 5 touched modules; 
 ## P1 — bootstrap (in progress)
 
 GitHub repos created (2026-05-16, all private under sirus20x6):
-- adamomaton-core
-- adamomaton-frontend
-- adamomaton-knowledge
-- adamomaton-deepresearch
-- adamomaton-platform
-- adamomaton-delegator
-- adamomaton-evolve
-- Adamomaton (umbrella)
+- adamaton-core
+- adamaton-frontend
+- adamaton-knowledge
+- adamaton-deepresearch
+- adamaton-platform
+- adamaton-delegator
+- adamaton-evolve
+- Adamaton (umbrella)
 
-Umbrella initialized at `/thearray/git/Adamomaton/` with:
+Umbrella initialized at `/thearray/git/Adamaton/` with:
 - `.gitmodules` pinning all 7 sub-repos
 - `bin/adam` CLI (claim/release/status/sync-hooks/deploy/bump/pin/pull)
 - `hooks/{pre-commit,pre-push,commit-msg,lib/lib.sh}`
@@ -54,16 +54,16 @@ Sub-repos remain empty (just their stub README) until P2 runs the migration scri
 
 ## Provenance
 
-Pre-Adamomaton history is preserved in:
+Pre-Adamaton history is preserved in:
 
 - **evo-archive** (created during P8) — full git history of the evo monorepo up to the P0 commits.
-- **deepresearch/platform repo** — frontend + platform code that pre-dated the consolidation; the relevant slices are imported into adamomaton-frontend and adamomaton-platform.
+- **deepresearch/platform repo** — frontend + platform code that pre-dated the consolidation; the relevant slices are imported into adamaton-frontend and adamaton-platform.
 
-For pre-Adamomaton blame:
+For pre-Adamaton blame:
 
 ```bash
 cd ~/evo-archive
 git log -- <path-as-it-was-in-evo>
 ```
 
-`git blame` after the cutover starts from "Initial commit: Adamomaton import from evo@<sha>" in each sub-repo. The commit's body lists the source evo SHA so you can chase further.
+`git blame` after the cutover starts from "Initial commit: Adamaton import from evo@<sha>" in each sub-repo. The commit's body lists the source evo SHA so you can chase further.

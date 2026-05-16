@@ -14,7 +14,7 @@
 
 services:
   nano-research-worker:
-    image: adamomaton-nano-research:${IMAGE_TAG:-dev}
+    image: adamaton-nano-research:${IMAGE_TAG:-dev}
     entrypoint: ["/usr/local/bin/nano-research-worker"]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
 
   figure-renderer:
-    image: adamomaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    image: adamaton-nano-figure-renderer:${IMAGE_TAG:-dev}
     expose:
       - "8090"
     restart: unless-stopped

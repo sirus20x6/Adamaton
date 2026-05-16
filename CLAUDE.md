@@ -1,6 +1,6 @@
-# Agent instructions — Adamomaton umbrella
+# Agent instructions — Adamaton umbrella
 
-You are working in the Adamomaton umbrella repo. The 7 sub-repos (core, frontend, knowledge, deepresearch, platform, delegator, evolve) are submodules pinned by SHA.
+You are working in the Adamaton umbrella repo. The 7 sub-repos (core, frontend, knowledge, deepresearch, platform, delegator, evolve) are submodules pinned by SHA.
 
 ## The two worktree modes
 
@@ -46,7 +46,7 @@ Each sub-repo has its own `CLAUDE.md` with build/test commands, dev DSN, and com
 
 ## Memory
 
-Memory dir at `~/.claude/projects/-thearray-git-Adamomaton/memory/`. Pre-Adamomaton memories were copied over from `~/.claude/projects/-thearray-git-evo/memory/` during the cutover. Reference relevant ones via `[[name]]` links in new memories.
+Memory dir at `~/.claude/projects/-thearray-git-Adamaton/memory/`. Pre-Adamaton memories were copied over from `~/.claude/projects/-thearray-git-evo/memory/` during the cutover. Reference relevant ones via `[[name]]` links in new memories.
 
 ## Pre-existing constraints (carried from evo)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for Adamomaton hooks (pre-commit, pre-push, commit-msg).
+# Shared helpers for Adamaton hooks (pre-commit, pre-push, commit-msg).
 # Sourced into each hook via: . "$(git rev-parse --show-toplevel)/../hooks/lib/lib.sh"
 # (or, for submodules, walks up until it finds the umbrella).
 

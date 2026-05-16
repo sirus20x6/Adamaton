@@ -5,7 +5,7 @@
 # image build/push step is a placeholder (see deploy/pi5/up.sh for rationale);
 # for now the operator builds the arm64 images on the workstation with
 # `make pi-nano-research-worker pi-nano-research`, ships them to the replica
-# out-of-band, and re-tags them as adamomaton-nano-research:$IMAGE_TAG.
+# out-of-band, and re-tags them as adamaton-nano-research:$IMAGE_TAG.
 
 set -euo pipefail
 
@@ -20,7 +20,7 @@ echo "==> deploying pi5-speaker replica at image tag ${IMAGE_TAG}"
 
 echo "==> [1/4] verify ${HOST} reachable + has docker"
 REMOTE_HOME=$(ssh -o ConnectTimeout=8 "$HOST" 'echo $HOME' | tr -d '\r')
-REMOTE_DIR="${REMOTE_DIR:-$REMOTE_HOME/Adamomaton-deploy}"
+REMOTE_DIR="${REMOTE_DIR:-$REMOTE_HOME/Adamaton-deploy}"
 ssh "$HOST" 'docker --version && docker compose version >/dev/null && uname -m' >/dev/null
 
 echo "==> [2/4] rsync deploy/pi5-speaker/ -> ${HOST}:${REMOTE_DIR}/"
@@ -38,8 +38,8 @@ if ! ssh "$HOST" "test -f '${REMOTE_DIR}/.env'"; then
 fi
 
 echo "==> [3/4] (placeholder) image build/push"
-echo "    skipped -- expect adamomaton-nano-research:${IMAGE_TAG} +"
-echo "             adamomaton-nano-figure-renderer:${IMAGE_TAG} on ${HOST}"
+echo "    skipped -- expect adamaton-nano-research:${IMAGE_TAG} +"
+echo "             adamaton-nano-figure-renderer:${IMAGE_TAG} on ${HOST}"
 
 echo "==> [4/4] docker compose up -d on ${HOST}"
 ssh "$HOST" "cd '${REMOTE_DIR}' && IMAGE_TAG='${IMAGE_TAG}' docker compose up -d && IMAGE_TAG='${IMAGE_TAG}' docker compose ps"
@@ -48,7 +48,7 @@ ssh "$HOST" "cd '${REMOTE_DIR}' && IMAGE_TAG='${IMAGE_TAG}' docker compose up -d
 sleep 5
 echo "==> verifying nano-research task queue has 2 pollers"
 ssh "$PI1_ALIAS" \
-    'docker exec adamomaton-deploy-temporal-1 temporal --address temporal:7233 \
+    'docker exec adamaton-deploy-temporal-1 temporal --address temporal:7233 \
         task-queue describe --task-queue nano-research 2>&1 | tail -20' || \
     echo "    (couldn't query Temporal -- check container name; harmless if first deploy)"
 

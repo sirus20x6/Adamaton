@@ -4,7 +4,7 @@
 
 ```
                               ┌────────────────────┐
-                              │ adamomaton-core    │  ← bottom of stack
+                              │ adamaton-core    │  ← bottom of stack
                               │  pgutil, llmclient │
                               │  octen, executor,  │
                               │  workerregistry,   │
@@ -67,7 +67,7 @@
 
 ## Go module dependencies
 
-Every component's `go.mod` has `require github.com/sirus20x6/adamomaton-core` (and additional pins for the higher-level deps).
+Every component's `go.mod` has `require github.com/sirus20x6/adamaton-core` (and additional pins for the higher-level deps).
 
 **No `replace` directives in sub-repo `go.mod`** — local dev resolves via the umbrella's `go.work`. CI inside a single sub-repo (without the umbrella) uses the pinned tagged versions.
 

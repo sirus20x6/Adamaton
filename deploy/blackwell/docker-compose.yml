@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
 
   evo-worker-kernel:
-    image: adamomaton-evo-worker:${IMAGE_TAG:-dev}
+    image: adamaton-evo-worker:${IMAGE_TAG:-dev}
     hostname: blackwell
     env_file: [.env]
     environment:
@@ -81,7 +81,7 @@ services:
     restart: unless-stopped
 
   distill-trainer:
-    image: adamomaton-distill-trainer:${IMAGE_TAG:-dev}
+    image: adamaton-distill-trainer:${IMAGE_TAG:-dev}
     # Manual trigger only -- `docker compose --profile train up distill-trainer`.
     profiles: [train]
     runtime: nvidia

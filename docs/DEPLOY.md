@@ -19,10 +19,10 @@ This runs `deploy/<host>/up.sh`, which:
 
 1. Reads the umbrella's current submodule pins.
 2. For each image that ships on `<host>`: cross-compiles the binary on the workstation, builds the arm64/amd64 OCI image, rsyncs the tar (wifi-friendly per `pi_caddy_bind_mount_inode` lesson).
-3. rsyncs the host-specific compose/Caddyfile/.env from `deploy/<host>/` to `<host>:~/Adamomaton-deploy/`.
+3. rsyncs the host-specific compose/Caddyfile/.env from `deploy/<host>/` to `<host>:~/Adamaton-deploy/`.
 4. SSH-execs `docker compose up -d && docker compose ps`.
 
-Image tags use the umbrella SHA: `adamomaton-platform:<umbrella-sha-short>`. Every deploy is reproducible from one ref. `latest` is updated only by `bin/adam deploy --promote`.
+Image tags use the umbrella SHA: `adamaton-platform:<umbrella-sha-short>`. Every deploy is reproducible from one ref. `latest` is updated only by `bin/adam deploy --promote`.
 
 ## Per-host quickstart
 
@@ -89,7 +89,7 @@ The `--rollback` form leaves the umbrella's HEAD unchanged and ships the older d
 Per the `pi_caddy_bind_mount_inode` memory: `mv newfile oldfile` on the host pins the OLD inode in the bind-mounted frontend container. Fix:
 
 ```bash
-ssh pi5 'cd ~/Adamomaton-deploy && docker compose restart frontend'
+ssh pi5 'cd ~/Adamaton-deploy && docker compose restart frontend'
 ```
 
 Not `caddy reload` — Caddy itself is fine; the bind-mount file handle is the problem.
@@ -104,4 +104,4 @@ rm -rf ~/.cache/adam-cross/
 
 ### Submodule SHA mismatch on Pi
 
-The Pi's `Adamomaton-deploy/` only contains the deploy/ files, not the source tree. If `docker compose pull` reports the wrong tag, the umbrella's pin was updated but `bin/adam deploy` was never re-run — re-run it.
+The Pi's `Adamaton-deploy/` only contains the deploy/ files, not the source tree. If `docker compose pull` reports the wrong tag, the umbrella's pin was updated but `bin/adam deploy` was never re-run — re-run it.
