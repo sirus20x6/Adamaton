@@ -1,5 +1,23 @@
 # Agent instructions — Adamaton umbrella
 
+> ## 🚫 BLOCKING — never commit to `main` directly.
+>
+> All agent work goes on a feature branch via `bin/adam claim <scope>/<task>`.
+> The pre-commit hook **hard-rejects** commits to `main`/`master` from the
+> canonical checkout. If you accidentally edited `main`, run `bin/adam rescue`
+> to recover (it stashes your changes so you can pop them into a fresh claim).
+>
+> First 3 commands for any new agent:
+> ```bash
+> bin/adam doctor                       # verify env (gh, go, hooks, submodules)
+> bin/adam sync-hooks                   # install hooks if doctor flagged them
+> bin/adam claim <scope>/<task>         # creates worktree + feature branch; cd into it
+> ```
+>
+> The ONLY supported way to land a commit on the umbrella's `main` is
+> `bin/adam bump <sub-repo>` (advances submodule pins; sets `ADAM_BUMP=1`
+> internally to skip the hook). Everything else needs a PR.
+
 You are working in the Adamaton umbrella repo. The 7 sub-repos (core, frontend, knowledge, deepresearch, platform, delegator, evolve) are submodules pinned by SHA.
 
 ## The two worktree modes
