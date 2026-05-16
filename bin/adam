@@ -641,6 +641,24 @@ load_ship_env() {
     [[ -n "${WORKSTATION_IP:-}" ]]     || die "$env_file must set WORKSTATION_IP"
 }
 
+# host_ssh_alias <host>: what name to pass to ssh. Honors HOST_SSH_<UPPER>
+# from ship.env; falls back to the bare logical name so ~/.ssh/config
+# Host stanzas resolve (e.g. `Host pi5\nHostName deepresearch.local`).
+host_ssh_alias() {
+    local h="$1" key
+    key="HOST_SSH_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-$h}"
+}
+
+# host_https_alias <host>: HTTPS hostname for Caddy. Honors
+# HOST_HTTPS_<UPPER> (e.g. HOST_HTTPS_PI5=deepresearch.local), else
+# defaults to <host>.local (mDNS convention). Use for curl; never ssh.
+host_https_alias() {
+    local h="$1" key
+    key="HOST_HTTPS_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-${h}.local}"
+}
+
 # service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
 # sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
 # the source (used for SHA tag + dirty check). image_name is the registry
@@ -706,7 +724,7 @@ cmd_ship() {
         # Caddy on the Pi terminates TLS with a self-signed/local cert that
         # the workstation may not have in its trust store, so use --insecure.
         # The bearer token still authenticates the request inside the agent.
-        local restart_url="https://${host}.lan/deploy/restart?service=${svc}&tag=${tag}"
+        local restart_url="https://$(host_https_alias "$host")/deploy/restart?service=${svc}&tag=${tag}"
         echo "    POST $restart_url"
         local resp
         if ! resp="$(curl -fsS --insecure \
@@ -717,7 +735,7 @@ cmd_ship() {
         fi
 
         # Poll /deploy/status until the new tag appears (or 60s elapse).
-        local status_url="https://${host}.lan/deploy/status?service=${svc}"
+        local status_url="https://$(host_https_alias "$host")/deploy/status?service=${svc}"
         local waited=0 ok=0
         while (( waited < 60 )); do
             sleep 5
@@ -767,14 +785,17 @@ cmd_ship_self() {
 
     # The agent can't restart itself (it would kill its own HTTP connection
     # mid-call), so we ssh in for this one. Bootstrap chicken-and-egg.
-    echo "    ssh $host: pin tag + compose up -d deploy-agent"
-    if ! ssh "$host" "cd ~/Adamaton-deploy && sed -i 's/^ADAMATON_DEPLOY_AGENT_TAG=.*/ADAMATON_DEPLOY_AGENT_TAG=${tag}/' image-tags.env && docker compose pull deploy-agent && docker compose up -d deploy-agent"; then
-        die "ssh-driven restart of deploy-agent on $host failed"
+    local ssh_target https_target
+    ssh_target=$(host_ssh_alias "$host")
+    https_target=$(host_https_alias "$host")
+    echo "    ssh $ssh_target: pin tag + compose up -d deploy-agent"
+    if ! ssh "$ssh_target" "cd ~/Adamaton-deploy && sed -i 's/^ADAMATON_DEPLOY_AGENT_TAG=.*/ADAMATON_DEPLOY_AGENT_TAG=${tag}/' image-tags.env && docker compose --env-file .env --env-file image-tags.env pull deploy-agent && docker compose --env-file .env --env-file image-tags.env up -d deploy-agent"; then
+        die "ssh-driven restart of deploy-agent on $ssh_target failed"
     fi
 
     # Give the agent a moment to come back, then poll /deploy/health.
     sleep 5
-    local health_url="https://${host}.lan/deploy/health"
+    local health_url="https://${https_target}/deploy/health"
     local waited=0 ok=0
     while (( waited < 30 )); do
         if curl -fsS --insecure --max-time 3 "$health_url" >/dev/null 2>&1; then
@@ -803,7 +824,6 @@ cmd_ship_self() {
 cmd_bootstrap() {
     [[ $# -eq 1 ]] || die "bootstrap: usage: adam bootstrap <host>"
     local host="$1"
-    local host_alias="${host}.lan"
 
     # Allow bootstrap with just WORKSTATION_IP — the token doesn't exist yet
     # on the first run. load_ship_env requires both, so we do a lighter check.
@@ -813,7 +833,15 @@ cmd_bootstrap() {
         source "$env_file"
     fi
     : "${WORKSTATION_IP:=10.0.4.37}"
-    echo "==> bootstrap $host (workstation registry ${WORKSTATION_IP}:5000)"
+
+    # ssh target obeys ~/.ssh/config Host aliases (or HOST_SSH_<UPPER>);
+    # https target is the Caddy cert SAN (HOST_HTTPS_<UPPER> override,
+    # else <host>.local mDNS). These are usually different — e.g. ssh
+    # alias 'pi5' -> deepresearch.local for the cert.
+    local host_alias https_target
+    host_alias=$(host_ssh_alias "$host")
+    https_target=$(host_https_alias "$host")
+    echo "==> bootstrap $host (ssh=$host_alias https=$https_target registry=${WORKSTATION_IP}:5000)"
 
     local deploy_src="$ADAM_ROOT/deploy/$host"
     [[ -d "$deploy_src" ]] || die "no such host: $deploy_src does not exist"
@@ -850,9 +878,21 @@ EOF_DAEMON
     " || die "daemon.json install failed on $host_alias"
 
     # 4. Locate the on-host deploy dir. Convention: ~/Adamaton-deploy.
-    local remote_dir='~/Adamaton-deploy'
-    if ! ssh "$host_alias" "test -d $remote_dir" 2>/dev/null; then
-        die "$host_alias:$remote_dir does not exist — run 'adam deploy $host' (or rsync deploy/$host/) before bootstrap"
+    local remote_dir
+    remote_dir=$(ssh "$host_alias" 'echo $HOME/Adamaton-deploy' | tr -d '\r')
+    [[ -n "$remote_dir" ]] || die "could not determine \$HOME on $host_alias"
+    ssh "$host_alias" "mkdir -p '$remote_dir'"
+
+    # Sync the latest deploy/<host>/ tree to the Pi so we have the new
+    # compose, image-tags.env.example, etc. Excludes .env to preserve
+    # the host's secrets across bootstrap runs.
+    echo "    [3b/8] rsync deploy/$host/ -> $host_alias:$remote_dir/"
+    if ! rsync -aP --partial \
+            --exclude=.env \
+            --exclude=image-tags.env \
+            --exclude=up.sh \
+            "$deploy_src/" "$host_alias:$remote_dir/"; then
+        die "rsync deploy/$host/ to $host_alias failed"
     fi
 
     # 5. DEPLOY_AGENT_TOKEN: reuse if present on the Pi, else generate.
@@ -912,12 +952,17 @@ EOF_DAEMON
     fi
 
     # 8. Bring the agent up + verify.
+    # --env-file (passed twice) merges image-tags.env into the variables
+    # docker compose uses to substitute ${ADAMATON_<SVC>_TAG} placeholders
+    # in image: refs. Without this compose only sees vars from the
+    # auto-loaded .env file, NOT from env_file: declarations (those only
+    # populate container environments, not template substitutions).
     echo "    [8/8] docker compose up -d deploy-agent + health check"
-    if ! ssh "$host_alias" "cd $remote_dir && docker compose up -d deploy-agent"; then
+    if ! ssh "$host_alias" "cd $remote_dir && docker compose --env-file .env --env-file image-tags.env up -d deploy-agent"; then
         die "docker compose up -d deploy-agent on $host_alias failed"
     fi
     sleep 5
-    local health_url="https://${host_alias}/deploy/health"
+    local health_url="https://${https_target}/deploy/health"
     local waited=0 ok=0
     while (( waited < 30 )); do
         if curl -fsS --insecure --max-time 3 "$health_url" >/dev/null 2>&1; then
