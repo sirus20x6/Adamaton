@@ -124,22 +124,59 @@ whose branches predate the change.
 v0 is done. The next phase is v1, which moves from in-memory simulation
 to real on-chain backings.
 
-## v1: ETH on Base — design strawman
+## v1: ETH on Base
 
-See [`v1-eth-foundation.md`](v1-eth-foundation.md) for the v1.0 design
-doc. It replaces the in-memory `LedgerEngine` and `FederationEngine` with
-smart contracts on Base (L2), introduces oracle-driven USD-equivalent
-accounting (with native ETH as the settlement asset), and ships the
-bootstrap mechanics (donation-mint, premined founder credit, per-client
-credit lines) that were left as design opens in v0.
-
-v1.0 is the foundation. Two follow-on phases are sketched in the same doc:
-
-- **v1.1** — EIP-5564 stealth addresses on the payment path + ERC-4337
-  AA paymaster for gas-payer privacy.
-- **v1.2** — ZK reputation via Semaphore-based group proofs (Federation
-  reputation goes from plaintext to commitment-tree).
+See [`v1-eth-foundation.md`](v1-eth-foundation.md) for the v1 design
+strawman (locked decisions; gwei-native accounting; no oracle, no fiat).
+It replaces the in-memory `LedgerEngine` and `FederationEngine` with
+smart contracts on Base (L2), introduces the bootstrap mechanics
+(donation-mint, premined founder credit, per-client credit lines), and
+sketches v1.1 (stealth addresses + AA paymaster), v1.2 (ZK reputation),
+and v1.3 (DVS-based non-transferable bindings) as follow-on phases.
 
 The asset-neutral `Settler` abstraction introduced in v1.0 leaves the
 door open for v2.x to add Monero (or any other asset) as a second
 settlement adapter without touching protocol-internal code.
+
+### v1.0 implementation — four-part partition
+
+Mirroring the v0 structure: four orchestrators in parallel, each owning
+one well-bounded slice. The per-orchestrator briefs:
+
+| Part | Plan file | Worktree command | Approx. lines |
+|------|-----------|------------------|---------------|
+| **A** Solidity contracts | [`v1.0-part-A-contracts.md`](v1.0-part-A-contracts.md) | `bin/adam claim core/v1-eth-A` | ~1500 |
+| **B** Go adapter layer | [`v1.0-part-B-go-adapter.md`](v1.0-part-B-go-adapter.md) | `bin/adam claim core/v1-eth-B` | ~2000 |
+| **C** Bootstrap + identity registration | [`v1.0-part-C-bootstrap.md`](v1.0-part-C-bootstrap.md) | `bin/adam claim core/v1-eth-C` | ~800 |
+| **D** Test infrastructure | [`v1.0-part-D-test-infra.md`](v1.0-part-D-test-infra.md) | `bin/adam claim core/v1-eth-D` | ~1000 |
+
+Each orchestrator reads `00-shared-context.md` + `v1-eth-foundation.md`
++ their specific part file.
+
+### Ownership boundaries (so the 4 parts don't stomp on each other)
+
+- **Part A** owns `core/contracts/` (Solidity + Foundry).
+- **Part B** owns `core/p2p/eth/` (Go adapter) + small extensions to
+  `iface/federation.go`, `iface/audit.go`, and the `Money → Gwei` relabel
+  in `types/types.go`.
+- **Part C** owns `core/p2p/orchestrator/` (for v1.0 lifecycle changes)
+  and `core/cmd/p2p-bootstrap/`.
+- **Part D** owns `core/p2p/eth/testharness/` and `core/deploy/v1/`.
+
+### Inter-part dependencies
+
+```
+   A (contracts) ─────────┬─────────► commits ABIs to core/contracts/abi/
+                          │
+   B (Go adapter) ────────┴────────── consumes ABIs via abigen
+            │
+            ├──► commits iface extensions early (Part C consumes)
+            │
+   C (bootstrap) ──────────────────── consumes B's iface + C's CLI is used by D's tests
+            │
+   D (test infra) ─────────────────── consumes A's deploy scripts, B's adapter, C's bootstrap CLI
+```
+
+Each orchestrator's plan file lists the specific deliverables, acceptance
+criteria, and `bin/adam release` command. Branches are pushed for review;
+no merges to main without explicit go-ahead.
