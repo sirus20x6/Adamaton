@@ -69,6 +69,18 @@ Fleet (multi-host rollouts):
 Single-host deploy:
   deploy <host>             run deploy/<host>/up.sh (rsync configs + compose up)
 
+Push-deploy (workstation registry -> deploy-agent on host):
+  bootstrap <host>          one-shot first-deploy: insecure-registry edit,
+                            token gen, image-tags.env init, scp+load the
+                            agent, compose up, health check, ship.env update.
+                            Idempotent; safe to re-run. Needs ssh + sudo on host.
+  ship <host> <service> ... build + push image(s) to the workstation registry,
+                            then POST /deploy/restart on <host>.lan for each.
+                            Reads token + registry IP from ~/.adamaton/ship.env.
+                            Refuses to ship if the sub-repo is git-dirty.
+  ship-self <host>          build + push deploy-agent and restart it on <host>
+                            via ssh (the agent cannot self-restart safely).
+
   help [subcommand]
 EOF
 }
@@ -614,6 +626,423 @@ fleet_promote() {
         echo "adam: no manifest change (already at $tag)"
 }
 
+# ---- ship: build + push to workstation registry, restart on host --------
+
+# Load DEPLOY_AGENT_TOKEN + WORKSTATION_IP from ~/.adamaton/ship.env. Both
+# subcommands need them; missing file points the user at the runbook.
+load_ship_env() {
+    local env_file="$HOME/.adamaton/ship.env"
+    if [[ ! -f "$env_file" ]]; then
+        die "missing $env_file — see docs/PUSH_DEPLOY.md for one-time setup (token + WORKSTATION_IP)"
+    fi
+    # shellcheck disable=SC1090
+    source "$env_file"
+    [[ -n "${DEPLOY_AGENT_TOKEN:-}" ]] || die "$env_file must set DEPLOY_AGENT_TOKEN"
+    [[ -n "${WORKSTATION_IP:-}" ]]     || die "$env_file must set WORKSTATION_IP"
+}
+
+# host_ssh_alias <host>: what name to pass to ssh. Honors HOST_SSH_<UPPER>
+# from ship.env; falls back to the bare logical name so ~/.ssh/config
+# Host stanzas resolve (e.g. `Host pi5\nHostName deepresearch.local`).
+host_ssh_alias() {
+    local h="$1" key
+    key="HOST_SSH_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-$h}"
+}
+
+# host_https_alias <host>: HTTPS hostname for Caddy. Honors
+# HOST_HTTPS_<UPPER> (e.g. HOST_HTTPS_PI5=deepresearch.local), else
+# defaults to <host>.local (mDNS convention). Use for curl; never ssh.
+host_https_alias() {
+    local h="$1" key
+    key="HOST_HTTPS_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-${h}.local}"
+}
+
+# host_deploy_url <host>: base URL for the deploy-agent (no trailing
+# slash). Defaults to http://<mdns_alias>:9128 because not every host
+# runs Caddy (pi5-speaker doesn't), and the bearer token is already
+# the security boundary -- TLS adds no auth value over LAN-internal
+# HTTP. Uses host_https_alias (mDNS .local by default, or the
+# HOST_HTTPS_<H> override) for the hostname because ssh aliases from
+# ~/.ssh/config aren't DNS-resolvable for curl. Override the whole URL
+# with HOST_DEPLOY_URL_<UPPER> in ship.env when a host fronts the agent
+# through HTTPS (e.g. https://deepresearch.local/deploy).
+host_deploy_url() {
+    local h="$1" key target
+    key="HOST_DEPLOY_URL_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    if [[ -n "${!key:-}" ]]; then
+        echo "${!key}"
+        return
+    fi
+    target=$(host_https_alias "$h")
+    echo "http://${target}:9128"
+}
+
+# host_platform <host>: docker buildx --platform value. Honors
+# HOST_PLATFORM_<UPPER> (e.g. HOST_PLATFORM_BLACKWELL=linux/amd64),
+# defaults to linux/arm64 (the Pi default). Used by ship + ship-self
+# + bootstrap so amd64 hosts don't end up with qemu-emulated arm64
+# images.
+host_platform() {
+    local h="$1" key
+    key="HOST_PLATFORM_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-linux/arm64}"
+}
+
+# service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
+# sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
+# the source (used for SHA tag + dirty check). image_name is the registry
+# repo name; several services share an image (nano-research-worker reuses
+# the nano-research image; evo-api ships the dashboard binary under its own
+# compose name; backend/worker-lo share platform-backend).
+ship_service_spec() {
+    case "$1" in
+        # dashboard + evo-api use context=. because dashboard/go.mod has
+        # replace directives that reach across to ../../core, ../../knowledge,
+        # etc. Multi-stage build needs every sub-repo in the build context.
+        dashboard)             echo "platform|platform/dashboard/Dockerfile|.|adamaton-dashboard" ;;
+        plugin-host)           echo "platform|platform/plugin-host/Dockerfile|platform/plugin-host|adamaton-plugin-host" ;;
+        dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|platform/dispatch|adamaton-dispatch-worker" ;;
+        deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|platform/deploy-agent|adamaton-deploy-agent" ;;
+        evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
+        backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
+        worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
+        r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|knowledge/r2g|adamaton-r2g" ;;
+        skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae" ;;
+        skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae-worker" ;;
+        skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|knowledge/skills|adamaton-skills-worker" ;;
+        reindex-worker)        echo "knowledge|knowledge/reindex/Dockerfile|knowledge/reindex|adamaton-reindex-worker" ;;
+        nano-research)         echo "deepresearch|deepresearch/nano-research/Dockerfile|deepresearch/nano-research|adamaton-nano-research" ;;
+        nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|deepresearch/nano-research|adamaton-nano-research" ;;
+        figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
+        evo-worker)            echo "evolve|evolve/evolve/Dockerfile|evolve/evolve|adamaton-evo-worker" ;;
+        *)                     return 1 ;;
+    esac
+}
+
+cmd_ship() {
+    [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
+    load_ship_env
+    local host="$1"; shift
+    local svc spec sub_repo dockerfile context image tag dirty img_ref status
+    for svc in "$@"; do
+        if ! spec="$(ship_service_spec "$svc")"; then
+            die "no Dockerfile mapping for '$svc' (extend ship_service_spec in bin/adam)"
+        fi
+        IFS='|' read -r sub_repo dockerfile context image <<<"$spec"
+        local sub_path="$ADAM_ROOT/$sub_repo"
+        [[ -d "$sub_path/.git" || -f "$sub_path/.git" ]] || die "sub-repo '$sub_repo' is not a git checkout"
+
+        # Refuse if dirty — workstation builds whatever the local tree has, so
+        # an unclean repo would ship un-committed code.
+        dirty="$(git_in "$sub_path" status --porcelain)"
+        if [[ -n "$dirty" ]]; then
+            die "$sub_repo has uncommitted changes; commit or stash first"
+        fi
+
+        tag="sha-$(git_in "$sub_path" rev-parse --short HEAD)"
+        img_ref="${WORKSTATION_IP}:5000/${image}"
+        echo "==> ship: $svc -> $img_ref:$tag"
+
+        if ! docker buildx build \
+            --platform "$(host_platform "$host")" \
+            --push \
+            -t "$img_ref:$tag" \
+            -t "$img_ref:main" \
+            -f "$ADAM_ROOT/$dockerfile" \
+            "$ADAM_ROOT/$context"; then
+            die "buildx failed for $svc"
+        fi
+
+        # Caddy on the Pi terminates TLS with a self-signed/local cert that
+        # the workstation may not have in its trust store, so use.
+        # The bearer token still authenticates the request inside the agent.
+        local restart_url="$(host_deploy_url "$host")/restart?service=${svc}&tag=${tag}"
+        echo "    POST $restart_url"
+        local resp
+        if ! resp="$(curl -fsS \
+                -X POST \
+                -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
+                "$restart_url" 2>&1)"; then
+            die "deploy-agent rejected restart of $svc on $host: $resp"
+        fi
+
+        # Poll /deploy/status until the new tag appears (or 60s elapse).
+        local status_url="$(host_deploy_url "$host")/status?service=${svc}"
+        local waited=0 ok=0
+        while (( waited < 60 )); do
+            sleep 5
+            waited=$((waited + 5))
+            status="$(curl -fsS \
+                -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
+                "$status_url" 2>/dev/null || true)"
+            if [[ "$status" == *"$tag"* ]]; then
+                ok=1
+                break
+            fi
+        done
+        if [[ "$ok" -eq 1 ]]; then
+            echo "    ok: $svc is on $tag (after ${waited}s)"
+        else
+            echo "adam: warning: $svc status did not reflect $tag within 60s on $host (deploy was accepted; check 'curl $status_url' manually)" >&2
+        fi
+    done
+}
+
+cmd_ship_self() {
+    [[ $# -ge 1 ]] || die "ship-self: usage: adam ship-self <host>"
+    load_ship_env
+    local host="$1"
+    local sub_path="$ADAM_ROOT/platform"
+    [[ -d "$sub_path/.git" || -f "$sub_path/.git" ]] || die "platform sub-repo is not a git checkout"
+
+    local dirty
+    dirty="$(git_in "$sub_path" status --porcelain)"
+    if [[ -n "$dirty" ]]; then
+        die "platform has uncommitted changes; commit or stash first"
+    fi
+
+    local tag="sha-$(git_in "$sub_path" rev-parse --short HEAD)"
+    local img_ref="${WORKSTATION_IP}:5000/adamaton-deploy-agent"
+    echo "==> ship-self: deploy-agent -> $img_ref:$tag on $host"
+
+    if ! docker buildx build \
+        --platform "$(host_platform "$host")" \
+        --push \
+        -t "$img_ref:$tag" \
+        -t "$img_ref:main" \
+        -f "$ADAM_ROOT/platform/deploy-agent/Dockerfile" \
+        "$ADAM_ROOT/platform/deploy-agent"; then
+        die "buildx failed for deploy-agent"
+    fi
+
+    # The agent can't restart itself (it would kill its own HTTP connection
+    # mid-call), so we ssh in for this one. Bootstrap chicken-and-egg.
+    local ssh_target https_target
+    ssh_target=$(host_ssh_alias "$host")
+    https_target=$(host_https_alias "$host")
+    echo "    ssh $ssh_target: pin tag + compose up -d deploy-agent"
+    if ! ssh "$ssh_target" "cd ~/Adamaton-deploy && sed -i 's/^ADAMATON_DEPLOY_AGENT_TAG=.*/ADAMATON_DEPLOY_AGENT_TAG=${tag}/' image-tags.env && docker compose --env-file .env --env-file image-tags.env pull deploy-agent && docker compose --env-file .env --env-file image-tags.env up -d deploy-agent"; then
+        die "ssh-driven restart of deploy-agent on $ssh_target failed"
+    fi
+
+    # Give the agent a moment to come back, then poll /health.
+    sleep 5
+    local health_url="$(host_deploy_url "$host")/health"
+    local waited=0 ok=0
+    while (( waited < 30 )); do
+        if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
+            ok=1
+            break
+        fi
+        sleep 3
+        waited=$((waited + 3))
+    done
+    if [[ "$ok" -eq 1 ]]; then
+        echo "    ok: deploy-agent on $host is healthy on $tag (after ${waited}s)"
+    else
+        die "deploy-agent on $host did not return healthy within 30s; check 'ssh $host docker compose logs deploy-agent'"
+    fi
+}
+
+# ---- bootstrap: chicken-and-egg first-deploy of deploy-agent ------------
+
+# One-shot per-host bootstrap. Idempotent in every step except the docker
+# daemon restart (which is a no-op if the insecure-registry is already
+# allow-listed). Assumes:
+#   - workstation registry is already running at ${WORKSTATION_IP}:5000
+#   - ssh <host>.lan works without a password prompt
+#   - the user on the host has passwordless sudo (for the daemon.json edit
+#     + docker restart). If not, the operator gets a password prompt.
+cmd_bootstrap() {
+    [[ $# -eq 1 ]] || die "bootstrap: usage: adam bootstrap <host>"
+    local host="$1"
+
+    # Allow bootstrap with just WORKSTATION_IP — the token doesn't exist yet
+    # on the first run. load_ship_env requires both, so we do a lighter check.
+    local env_file="$HOME/.adamaton/ship.env"
+    if [[ -f "$env_file" ]]; then
+        # shellcheck disable=SC1090
+        source "$env_file"
+    fi
+    : "${WORKSTATION_IP:=10.0.4.37}"
+
+    # ssh target obeys ~/.ssh/config Host aliases (or HOST_SSH_<UPPER>);
+    # https target is the Caddy cert SAN (HOST_HTTPS_<UPPER> override,
+    # else <host>.local mDNS). These are usually different — e.g. ssh
+    # alias 'pi5' -> deepresearch.local for the cert.
+    local host_alias https_target
+    host_alias=$(host_ssh_alias "$host")
+    https_target=$(host_https_alias "$host")
+    echo "==> bootstrap $host (ssh=$host_alias https=$https_target registry=${WORKSTATION_IP}:5000)"
+
+    local deploy_src="$ADAM_ROOT/deploy/$host"
+    [[ -d "$deploy_src" ]] || die "no such host: $deploy_src does not exist"
+    [[ -f "$deploy_src/MANIFEST.yaml" ]] || die "$deploy_src/MANIFEST.yaml missing"
+
+    # 1. Reachability check.
+    echo "    [1/8] ssh reachability ($host_alias)"
+    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$host_alias" true 2>/dev/null; then
+        die "cannot ssh $host_alias without a password — set up ssh-copy-id first"
+    fi
+
+    # 2. Registry reachability from workstation side. Cheap fail-fast.
+    echo "    [2/8] workstation registry reachable"
+    if ! curl -fsS --max-time 3 "http://${WORKSTATION_IP}:5000/v2/_catalog" >/dev/null; then
+        die "workstation registry not reachable at ${WORKSTATION_IP}:5000 — start it with: docker run -d --restart=unless-stopped --name adamaton-registry -p 5000:5000 -v adamaton-registry-data:/var/lib/registry registry:2"
+    fi
+
+    # 3. Insecure-registry allow-list on the Pi. Idempotent — only writes
+    # daemon.json if our entry is missing, then restarts docker.
+    echo "    [3/8] /etc/docker/daemon.json allow-list (idempotent; may sudo)"
+    local daemon_json
+    daemon_json=$(cat <<EOF_DAEMON
+{ "insecure-registries": ["${WORKSTATION_IP}:5000"] }
+EOF_DAEMON
+)
+    ssh "$host_alias" "
+        set -e
+        if ! sudo grep -qF '${WORKSTATION_IP}:5000' /etc/docker/daemon.json 2>/dev/null; then
+            sudo mkdir -p /etc/docker
+            echo '$daemon_json' | sudo tee /etc/docker/daemon.json > /dev/null
+            sudo systemctl restart docker
+            sleep 2
+        fi
+    " || die "daemon.json install failed on $host_alias"
+
+    # 4. Locate the on-host deploy dir. Convention: ~/Adamaton-deploy.
+    local remote_dir
+    remote_dir=$(ssh "$host_alias" 'echo $HOME/Adamaton-deploy' | tr -d '\r')
+    [[ -n "$remote_dir" ]] || die "could not determine \$HOME on $host_alias"
+    ssh "$host_alias" "mkdir -p '$remote_dir'"
+
+    # Sync the latest deploy/<host>/ tree to the Pi so we have the new
+    # compose, image-tags.env.example, etc. Excludes .env to preserve
+    # the host's secrets across bootstrap runs.
+    echo "    [3b/8] rsync deploy/$host/ -> $host_alias:$remote_dir/"
+    if ! rsync -aP --partial \
+            --exclude=.env \
+            --exclude=image-tags.env \
+            --exclude=up.sh \
+            "$deploy_src/" "$host_alias:$remote_dir/"; then
+        die "rsync deploy/$host/ to $host_alias failed"
+    fi
+
+    # 5. DEPLOY_AGENT_TOKEN: reuse if present on the Pi, else generate.
+    echo "    [4/8] DEPLOY_AGENT_TOKEN on $host_alias"
+    local remote_token
+    remote_token=$(ssh "$host_alias" "
+        cd $remote_dir
+        existing=\$(grep -E '^DEPLOY_AGENT_TOKEN=' .env 2>/dev/null | tail -1 | cut -d= -f2-)
+        if [[ -z \"\$existing\" ]]; then
+            new_token=\$(openssl rand -hex 32)
+            echo \"DEPLOY_AGENT_TOKEN=\$new_token\" >> .env
+            echo \"\$new_token\"
+        else
+            echo \"\$existing\"
+        fi
+    ") || die "token install on $host_alias failed"
+    [[ -n "$remote_token" ]] || die "empty token returned from $host_alias"
+
+    # 6. image-tags.env: cp from .example if missing, then pin
+    # ADAMATON_DEPLOY_AGENT_TAG=bootstrap for the first run.
+    echo "    [5/8] image-tags.env initialized + pinned to 'bootstrap'"
+    ssh "$host_alias" "
+        set -e
+        cd $remote_dir
+        if [[ ! -f image-tags.env ]]; then
+            cp image-tags.env.example image-tags.env
+        fi
+        if grep -qE '^ADAMATON_DEPLOY_AGENT_TAG=' image-tags.env; then
+            sed -i 's/^ADAMATON_DEPLOY_AGENT_TAG=.*/ADAMATON_DEPLOY_AGENT_TAG=bootstrap/' image-tags.env
+        else
+            echo 'ADAMATON_DEPLOY_AGENT_TAG=bootstrap' >> image-tags.env
+        fi
+    " || die "image-tags.env setup on $host_alias failed"
+
+    # 7. Build the bootstrap deploy-agent locally + scp+load to the Pi.
+    # We bypass the registry on this one image (chicken-and-egg) by using
+    # --load instead of --push, then docker save | ssh docker load.
+    echo "    [6/8] building bootstrap deploy-agent (arm64, local load)"
+    if ! docker buildx build \
+            --platform "$(host_platform "$host")" \
+            --load \
+            -t "adamaton-deploy-agent:bootstrap" \
+            -f "$ADAM_ROOT/platform/deploy-agent/Dockerfile" \
+            "$ADAM_ROOT/platform/deploy-agent"; then
+        die "buildx --load failed for deploy-agent bootstrap"
+    fi
+
+    echo "    [7/8] streaming bootstrap image to $host_alias"
+    if ! docker save adamaton-deploy-agent:bootstrap | ssh "$host_alias" "
+        set -e
+        docker load
+        # Compose references the image with the registry prefix, so retag
+        # the just-loaded image under the prefix without pushing it.
+        docker tag adamaton-deploy-agent:bootstrap '${WORKSTATION_IP}:5000/adamaton-deploy-agent:bootstrap'
+    "; then
+        die "docker save | ssh docker load failed for $host_alias"
+    fi
+
+    # 8. Bring the agent up + verify.
+    # --env-file (passed twice) merges image-tags.env into the variables
+    # docker compose uses to substitute ${ADAMATON_<SVC>_TAG} placeholders
+    # in image: refs. Without this compose only sees vars from the
+    # auto-loaded .env file, NOT from env_file: declarations (those only
+    # populate container environments, not template substitutions).
+    echo "    [8/8] docker compose up -d deploy-agent + health check"
+    if ! ssh "$host_alias" "cd $remote_dir && docker compose --env-file .env --env-file image-tags.env up -d deploy-agent"; then
+        die "docker compose up -d deploy-agent on $host_alias failed"
+    fi
+    sleep 5
+    local health_url="$(host_deploy_url "$host")/health"
+    local waited=0 ok=0
+    while (( waited < 30 )); do
+        if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then
+            ok=1
+            break
+        fi
+        sleep 3
+        waited=$((waited + 3))
+    done
+    [[ "$ok" -eq 1 ]] || die "$health_url did not return healthy within 30s; check 'ssh $host_alias docker compose logs deploy-agent'"
+
+    # Stash the host's token in ship.env so subsequent `ship` calls work.
+    # Idempotent replace; never appends a duplicate. ship.env is per-host
+    # tokens are awkward; for now we assume one token per workstation/fleet
+    # — note this in the runbook.
+    mkdir -p "$HOME/.adamaton"
+    chmod 700 "$HOME/.adamaton"
+    if [[ -f "$env_file" ]] && grep -qE '^DEPLOY_AGENT_TOKEN=' "$env_file"; then
+        sed -i "s|^DEPLOY_AGENT_TOKEN=.*|DEPLOY_AGENT_TOKEN=${remote_token}|" "$env_file"
+    else
+        {
+            grep -vE '^DEPLOY_AGENT_TOKEN=|^WORKSTATION_IP=' "$env_file" 2>/dev/null || true
+            echo "WORKSTATION_IP=${WORKSTATION_IP}"
+            echo "DEPLOY_AGENT_TOKEN=${remote_token}"
+        } > "${env_file}.tmp" && mv "${env_file}.tmp" "$env_file"
+    fi
+    chmod 600 "$env_file"
+
+    cat <<EOF_DONE
+
+==> bootstrap complete on $host
+
+  The agent is running on the 'bootstrap' tag (locally-loaded image; not
+  in the registry). To switch to a registry-tagged build:
+
+      adam ship-self $host
+
+  Once on a registry tag, shipping other services is just:
+
+      adam ship $host r2g
+      adam ship $host plugin-host dispatch-worker
+
+  ~/.adamaton/ship.env has been updated with the agent token.
+EOF_DONE
+}
+
 # ---- dispatch ------------------------------------------------------------
 
 if [[ $# -eq 0 ]]; then usage; exit 0; fi
@@ -633,6 +1062,9 @@ case "$1" in
     clean)      shift; cmd_clean "$@" ;;
     rescue)     shift; cmd_rescue "$@" ;;
     fleet)      shift; cmd_fleet "$@" ;;
+    ship)       shift; cmd_ship "$@" ;;
+    ship-self)  shift; cmd_ship_self "$@" ;;
+    bootstrap)  shift; cmd_bootstrap "$@" ;;
     help|-h|--help) usage ;;
     *) die "unknown subcommand '$1'; try 'adam help'" ;;
 esac

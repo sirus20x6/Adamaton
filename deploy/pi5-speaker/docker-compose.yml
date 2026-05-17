@@ -3,6 +3,7 @@
 # Runs ONLY:
 #   - nano-research-worker  (extra Temporal worker on the nano-research queue)
 #   - figure-renderer       (matplotlib sidecar; local LAN-internal hop)
+#   - deploy-agent          (push-deploy receiver; see platform/deploy-agent)
 #
 # Backing services (postgres, temporal, skills-rae) live on Pi #1 and are
 # reached over the LAN via PI1_HOST (set in .env). Pi #1 must expose:
@@ -10,11 +11,20 @@
 #   - temporal :7233   (already 0.0.0.0:7233 in deploy/pi5)
 #   - skills-rae :7376 (already 0.0.0.0:7376 in deploy/pi5)
 #
+# Image refs use the workstation's local registry at ${WORKSTATION_IP}:5000
+# (default 10.0.4.37:5000). Each service has its own per-image tag env var
+# (ADAMATON_<NAME>_TAG) sourced from image-tags.env; the deploy-agent
+# rewrites the relevant line on every /deploy/restart call.
+#
 # Pattern ported from /thearray/git/evo/nano-research/deploy/pi-replica/docker-compose.yml.
 
 services:
   nano-research-worker:
-    image: adamaton-nano-research:${IMAGE_TAG:-dev}
+    # Shares the adamaton-nano-research image with the pi5 nano-research
+    # service; entrypoint differs. The tag var stays in sync because both
+    # reference ADAMATON_NANO_RESEARCH_TAG.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
+    env_file: [.env, image-tags.env]
     entrypoint: ["/usr/local/bin/nano-research-worker"]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -38,9 +48,36 @@ services:
     restart: unless-stopped
 
   figure-renderer:
-    image: adamaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-figure-renderer:${ADAMATON_FIGURE_RENDERER_TAG:-main}
+    env_file: [.env, image-tags.env]
     expose:
       - "8090"
+    restart: unless-stopped
+
+  # ---- push-deploy receiver -----------------------------------------------
+  deploy-agent:
+    # Bumped via `bin/adam ship-self pi5-speaker` (ssh-based; the agent
+    # can't restart itself without cutting the connection). All other
+    # services bump via `bin/adam ship pi5-speaker <service>` which talks
+    # to this agent.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-deploy-agent:${ADAMATON_DEPLOY_AGENT_TAG:-main}
+    env_file: [.env, image-tags.env]
+    environment:
+      DEPLOY_AGENT_HOST: pi5-speaker
+      # See deploy/pi5/docker-compose.yml deploy-agent comment for why
+      # the cwd MUST be a host-side path, not a container-only path.
+      DEPLOY_AGENT_COMPOSE_DIR: /home/sirus/Adamaton-deploy
+      DEPLOY_AGENT_BIND: ":9128"
+    working_dir: /home/sirus/Adamaton-deploy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/sirus/Adamaton-deploy:/home/sirus/Adamaton-deploy
+    ports:
+      # LAN-direct. bin/adam ship uses http://<host>:9128 instead of going
+      # through Caddy/HTTPS -- pi5-speaker has no Caddy edge, and the
+      # bearer token is the security boundary anyway. Firewall the
+      # 10.0.4.x subnet at the gateway, not here.
+      - "9128:9128"
     restart: unless-stopped
 
 volumes:

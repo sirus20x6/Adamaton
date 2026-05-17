@@ -3,12 +3,20 @@
 # Hosts:
 #   - vllm                — Qwen3.6-27b-nvfp8 OpenAI-compatible server with
 #                           --enable-lora for distill LoRA hot-swaps
+#                           (UPSTREAM image, not bumped via deploy-agent)
 #   - evo-worker-kernel   — extra Temporal worker pinned to the KernelBench
 #                           queue, reaches back to pi5's Temporal + Postgres
 #                           and dispatches kernel evals to the LOCAL CUDA
 #                           runtime (EVO_KERNEL_REMOTE_HOST="" means "run
 #                           here" per evolve/activities/evaluate.go)
 #   - distill-trainer     — manual-trigger trainer container (profile=train)
+#   - deploy-agent        — push-deploy receiver; see platform/deploy-agent
+#
+# Adamaton image refs use the workstation's local registry at
+# ${WORKSTATION_IP}:5000 (default 10.0.4.37:5000). Each adamaton-* service
+# has its own per-image tag env var (ADAMATON_<NAME>_TAG) sourced from
+# image-tags.env; the deploy-agent rewrites the relevant line on every
+# /deploy/restart call. Third-party images (vllm) are pinned via .env.
 #
 # Backing services (postgres, temporal, skills-rae) all live on pi5; this
 # stack stays narrow on purpose -- the GPU is the scarce resource.
@@ -19,7 +27,8 @@
 services:
   vllm:
     # Pinned to the same upstream image used today; the exact tag is bumped
-    # in .env per release.
+    # in .env per release. NOT routed through the workstation registry --
+    # upstream image, deploy-agent leaves it alone.
     image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
     runtime: nvidia
     environment:
@@ -53,9 +62,9 @@ services:
     restart: unless-stopped
 
   evo-worker-kernel:
-    image: adamaton-evo-worker:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
     hostname: blackwell
-    env_file: [.env]
+    env_file: [.env, image-tags.env]
     environment:
       TEMPORAL_ADDRESS: ${PI1_HOST:-10.0.4.30}:7233
       TEMPORAL_NAMESPACE: default
@@ -81,7 +90,8 @@ services:
     restart: unless-stopped
 
   distill-trainer:
-    image: adamaton-distill-trainer:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-distill-trainer:${ADAMATON_DISTILL_TRAINER_TAG:-main}
+    env_file: [.env, image-tags.env]
     # Manual trigger only -- `docker compose --profile train up distill-trainer`.
     profiles: [train]
     runtime: nvidia
@@ -96,6 +106,31 @@ services:
       - ${LORA_DIR:-/srv/checkpoints/lora}:/loras
       - ${DISTILL_OUTPUT_DIR:-/srv/checkpoints/distill}:/srv/checkpoints/distill
     restart: "no"
+
+  # ---- push-deploy receiver -----------------------------------------------
+  deploy-agent:
+    # Bumped via `bin/adam ship-self blackwell` (ssh-based; the agent can't
+    # restart itself without cutting the connection). All other services
+    # bump via `bin/adam ship blackwell <service>` which talks to this agent.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-deploy-agent:${ADAMATON_DEPLOY_AGENT_TAG:-main}
+    env_file: [.env, image-tags.env]
+    environment:
+      DEPLOY_AGENT_HOST: blackwell
+      # See deploy/pi5/docker-compose.yml deploy-agent comment for why
+      # the cwd MUST be a host-side path, not a container-only path.
+      DEPLOY_AGENT_COMPOSE_DIR: /home/sirus/Adamaton-deploy
+      DEPLOY_AGENT_BIND: ":9128"
+    working_dir: /home/sirus/Adamaton-deploy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/sirus/Adamaton-deploy:/home/sirus/Adamaton-deploy
+    ports:
+      # LAN-direct. bin/adam ship uses http://<host>:9128 instead of going
+      # through Caddy/HTTPS -- pi5-speaker has no Caddy edge, and the
+      # bearer token is the security boundary anyway. Firewall the
+      # 10.0.4.x subnet at the gateway, not here.
+      - "9128:9128"
+    restart: unless-stopped
 
 volumes:
   kernelbench_scratch:

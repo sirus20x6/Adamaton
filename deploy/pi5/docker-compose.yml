@@ -1,9 +1,15 @@
 # deploy/pi5/docker-compose.yml — main Adamaton stack (Raspberry Pi 5, arm64).
 #
-# Source of truth ported from pi5:~/deepresearch/docker-compose.yml (the live
-# production compose) on 2026-05-16, with image names rewritten to the
-# adamaton-<component>:<umbrella-sha-short> convention. The umbrella SHA is
-# substituted at deploy time by up.sh via the IMAGE_TAG env var.
+# Image refs use the workstation's local registry at ${WORKSTATION_IP}:5000
+# (default 10.0.4.37:5000). Each service has its own per-image tag env var
+# (ADAMATON_<NAME>_TAG) sourced from image-tags.env; the deploy-agent
+# rewrites the relevant line on every /deploy/restart call.
+#
+# Two things must be true at deploy time:
+#   1. /etc/docker/daemon.json on this Pi lists 10.0.4.37:5000 as an
+#      insecure-registry (HTTP, LAN-only). See docs/PUSH_DEPLOY.md.
+#   2. image-tags.env exists (cp image-tags.env.example image-tags.env on
+#      first boot; deploy-agent rewrites it on every push thereafter).
 #
 # Services:
 #   - postgres (pgvector/pgvector:pg16) — shared backing store for every schema
@@ -22,6 +28,7 @@
 #   - evo-api (Go) — dashboard/aggregator API (the /api/v1/* surface)
 #   - skills-worker, reindex-worker, dispatch-worker, evo-worker — Temporal workers
 #   - frontend (caddy:2-alpine) — SPA host + reverse proxy (Caddyfile)
+#   - deploy-agent (Go) — push-deploy receiver; see platform/deploy-agent
 
 services:
   postgres:
@@ -107,7 +114,8 @@ services:
 
   # ---- knowledge sub-repo --------------------------------------------------
   r2g:
-    image: adamaton-r2g:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-r2g:${ADAMATON_R2G_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       R2G_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       R2G_PORT: "7373"
@@ -132,7 +140,8 @@ services:
     restart: unless-stopped
 
   skills-rae:
-    image: adamaton-skills-rae:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae:${ADAMATON_SKILLS_RAE_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       SKILLS_RAE_PORT: "7376"
@@ -152,7 +161,9 @@ services:
     restart: unless-stopped
 
   skills-rae-worker:
-    image: adamaton-skills-rae-worker:${IMAGE_TAG:-dev}
+    hostname: pi
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae-worker:${ADAMATON_SKILLS_RAE_WORKER_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
@@ -171,8 +182,8 @@ services:
 
   skills-worker:
     hostname: pi
-    image: adamaton-skills-worker:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-worker:${ADAMATON_SKILLS_WORKER_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
@@ -191,7 +202,8 @@ services:
 
   reindex-worker:
     hostname: pi
-    image: adamaton-reindex-worker:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-reindex-worker:${ADAMATON_REINDEX_WORKER_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
@@ -224,7 +236,8 @@ services:
 
   # ---- deepresearch sub-repo ----------------------------------------------
   nano-research:
-    image: adamaton-nano-research:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       NANO_RESEARCH_PORT: "7378"
@@ -246,7 +259,11 @@ services:
     restart: unless-stopped
 
   nano-research-worker:
-    image: adamaton-nano-research:${IMAGE_TAG:-dev}
+    # Shares the adamaton-nano-research image with the nano-research service
+    # above; entrypoint differs. The tag var stays in sync because both
+    # reference ADAMATON_NANO_RESEARCH_TAG.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
+    env_file: [.env, image-tags.env]
     entrypoint: ["/usr/local/bin/nano-research-worker"]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
@@ -271,7 +288,8 @@ services:
     restart: unless-stopped
 
   figure-renderer:
-    image: adamaton-nano-figure-renderer:${IMAGE_TAG:-dev}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-figure-renderer:${ADAMATON_FIGURE_RENDERER_TAG:-main}
+    env_file: [.env, image-tags.env]
     expose:
       - "8090"
     restart: unless-stopped
@@ -281,8 +299,8 @@ services:
     init: true
     # Python R2R backend. Still built from the platform sub-repo until the
     # planned platform/backend → Go cutover lands.
-    image: adamaton-platform-backend:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-platform-backend:${ADAMATON_BACKEND_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       R2R_CONFIG_PATH: /app/configs/platform.toml
       PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
@@ -315,8 +333,10 @@ services:
     restart: unless-stopped
 
   worker-lo:
-    image: adamaton-platform-backend:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    # Shares the adamaton-platform-backend image with the backend service
+    # above; entrypoint differs. Tag stays in sync via ADAMATON_BACKEND_TAG.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-platform-backend:${ADAMATON_BACKEND_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       R2R_CONFIG_PATH: /app/configs/platform.toml
       PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
@@ -338,8 +358,8 @@ services:
     restart: unless-stopped
 
   plugin-host:
-    image: adamaton-plugin-host:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-plugin-host:${ADAMATON_PLUGIN_HOST_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       PH_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       PH_PORT: "7375"
@@ -359,8 +379,8 @@ services:
 
   dispatch-worker:
     hostname: pi
-    image: adamaton-dispatch-worker:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-dispatch-worker:${ADAMATON_DISPATCH_WORKER_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
@@ -374,8 +394,8 @@ services:
     restart: unless-stopped
 
   evo-api:
-    image: adamaton-evo-api:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-api:${ADAMATON_EVO_API_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       GITEA_BASE_URL: ${GITEA_BASE_URL:-http://localhost}
@@ -410,8 +430,8 @@ services:
   # ---- evolve sub-repo ----------------------------------------------------
   evo-worker:
     hostname: pi
-    image: adamaton-evo-worker:${IMAGE_TAG:-dev}
-    env_file: [.env]
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
+    env_file: [.env, image-tags.env]
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
@@ -457,6 +477,41 @@ services:
       - r2g
       - skills-rae
       - plugin-host
+      - deploy-agent
+    restart: unless-stopped
+
+  # ---- push-deploy receiver -----------------------------------------------
+  deploy-agent:
+    # Bumped via `bin/adam ship-self pi5` (ssh-based; the agent can't
+    # restart itself without cutting the connection). All other services
+    # bump via `bin/adam ship pi5 <service>` which talks to this agent.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-deploy-agent:${ADAMATON_DEPLOY_AGENT_TAG:-main}
+    env_file: [.env, image-tags.env]
+    environment:
+      DEPLOY_AGENT_HOST: pi5
+      # MUST equal the host-side path. The agent shells out to docker
+      # compose against the host docker daemon; relative paths in the
+      # compose file (./postgres-pi.conf etc.) get resolved against
+      # this cwd and then sent to the daemon as bind-mount sources.
+      # If this is a container-only path like /workdir the daemon
+      # creates empty ghost dirs on the host and bind-mounts those.
+      DEPLOY_AGENT_COMPOSE_DIR: /home/sirus/Adamaton-deploy
+      DEPLOY_AGENT_BIND: ":9128"
+    working_dir: /home/sirus/Adamaton-deploy
+    volumes:
+      # Docker socket: agent shells out to `docker compose` against the
+      # host daemon. Root-equivalent; bearer token is the boundary.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Bind-mount the deploy dir at the SAME path on both sides so
+      # compose's relative-path resolution gives identical results
+      # whether evaluated from the agent's view or the host daemon's.
+      - /home/sirus/Adamaton-deploy:/home/sirus/Adamaton-deploy
+    ports:
+      # LAN-direct. bin/adam ship uses http://<host>:9128 instead of going
+      # through Caddy/HTTPS -- pi5-speaker has no Caddy edge, and the
+      # bearer token is the security boundary anyway. Firewall the
+      # 10.0.4.x subnet at the gateway, not here.
+      - "9128:9128"
     restart: unless-stopped
 
 volumes:
