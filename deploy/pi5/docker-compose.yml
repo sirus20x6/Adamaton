@@ -316,7 +316,6 @@ services:
       R2R_CONFIG_PATH: /app/configs/platform.toml
       PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       REDIS_URL: redis://redis:6379
-      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
       RESEARCH_USE_OCTEN_RETRIEVAL: "true"
       RESEARCH_RERANK_TIMEOUT: "30"
@@ -352,7 +351,6 @@ services:
       R2R_CONFIG_PATH: /app/configs/platform.toml
       PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       REDIS_URL: redis://redis:6379
-      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
       R2R_INTERNAL_URL: http://r2g:7373
     extra_hosts:
