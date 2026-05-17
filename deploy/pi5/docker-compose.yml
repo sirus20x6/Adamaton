@@ -326,6 +326,12 @@ services:
       NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
       FIGURE_RENDERER_URL: http://figure-renderer:8090
       NANO_WORKER_LABEL: pi5
+      # R2G_URL composes TGS-RAG Channels 1↔2: when set, searchcore
+      # strategies (IterativeRefinement, IterDrag) call r2g alongside
+      # searxng, so Channel 1's vote-aware retrieval and Channel 2's
+      # orphan bridging share the same hit stream. Comment out for
+      # web-only behaviour (no Channel 1 contribution).
+      R2G_URL: http://r2g:7373
     extra_hosts:
       - "workstation:${WORKSTATION_IP:-10.0.4.37}"
     depends_on:
