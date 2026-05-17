@@ -731,6 +731,13 @@ ship_service_spec() {
         nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
+        # Unified build-tag-configurable worker. Three variants share the
+        # same Dockerfile + source tree; each variant pins a multi-stage
+        # --target and a GO_TAGS build-arg. The extra spec fields after
+        # the image name are: target|go_tags (parsed by cmd_ship).
+        adamaton-worker-light) echo "platform|platform/worker/Dockerfile|.|adamaton-worker-light|runtime-light|skills reindex dispatch" ;;
+        adamaton-worker-full)  echo "platform|platform/worker/Dockerfile|.|adamaton-worker-full|runtime-full|skills reindex dispatch evo" ;;
+        adamaton-worker-gpu)   echo "platform|platform/worker/Dockerfile|.|adamaton-worker-gpu|runtime-gpu|evo" ;;
         *)                     return 1 ;;
     esac
 }
@@ -739,12 +746,16 @@ cmd_ship() {
     [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
     load_ship_env
     local host="$1"; shift
-    local svc spec sub_repo dockerfile context image tag dirty img_ref status
+    local svc spec sub_repo dockerfile context image target go_tags tag dirty img_ref status
     for svc in "$@"; do
         if ! spec="$(ship_service_spec "$svc")"; then
             die "no Dockerfile mapping for '$svc' (extend ship_service_spec in bin/adam)"
         fi
-        IFS='|' read -r sub_repo dockerfile context image <<<"$spec"
+        # 4-field (legacy) or 6-field (with multi-stage target + build-arg).
+        # IFS-read is happy with either: the optional fields fall through
+        # as empty strings.
+        target=""; go_tags=""
+        IFS='|' read -r sub_repo dockerfile context image target go_tags <<<"$spec"
         local sub_path="$ADAM_ROOT/$sub_repo"
         [[ -d "$sub_path/.git" || -f "$sub_path/.git" ]] || die "sub-repo '$sub_repo' is not a git checkout"
 
@@ -759,13 +770,20 @@ cmd_ship() {
         img_ref="${WORKSTATION_IP}:5000/${image}"
         echo "==> ship: $svc -> $img_ref:$tag"
 
-        if ! docker buildx build \
-            --platform "$(host_platform "$host")" \
-            --push \
-            -t "$img_ref:$tag" \
-            -t "$img_ref:main" \
-            -f "$ADAM_ROOT/$dockerfile" \
-            "$ADAM_ROOT/$context"; then
+        local buildx_args=(
+            --platform "$(host_platform "$host")"
+            --push
+            -t "$img_ref:$tag"
+            -t "$img_ref:main"
+            -f "$ADAM_ROOT/$dockerfile"
+        )
+        if [[ -n "$target" ]]; then
+            buildx_args+=(--target "$target")
+        fi
+        if [[ -n "$go_tags" ]]; then
+            buildx_args+=(--build-arg "GO_TAGS=$go_tags")
+        fi
+        if ! docker buildx build "${buildx_args[@]}" "$ADAM_ROOT/$context"; then
             die "buildx failed for $svc"
         fi
 

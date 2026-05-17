@@ -1,5 +1,11 @@
-# Worker-types catalog entry — reindex-worker. See skills-worker.yml
-# for the WORKER_* var conventions.
+# Worker-types catalog entry — reindex-worker.
+#
+# DEPRECATED: superseded by adamaton-worker.yml (the unified
+# build-tag-configurable container). Kept for one release cycle so
+# `bin/adam deploy --rollback` can still spawn the standalone worker
+# from a previous umbrella SHA. New nodes should use adamaton-worker.
+#
+# See skills-worker.yml for the WORKER_* var conventions.
 #
 # PLATFORM_BASE_URL + R2G_URL default to the pi5 compose-internal names;
 # override via env to use LAN addresses (e.g. PLATFORM_BASE_URL=

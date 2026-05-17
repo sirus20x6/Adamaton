@@ -8,18 +8,19 @@
 go 1.25.0
 
 use (
-    ./core
-    ./deepresearch/nano-research
-    ./delegator/delegator
-    ./delegator/mcp
-    ./evolve/evolve
-    ./evolve/workflow-builder
-    ./knowledge/r2g
-    ./knowledge/reindex
-    ./knowledge/skills
-    ./knowledge/skills-rae
-    ./platform/dashboard
-    ./platform/dispatch
-    ./platform/plugin-host
-    ./platform/temporal
+	./core
+	./deepresearch/nano-research
+	./delegator/delegator
+	./delegator/mcp
+	./evolve/evolve
+	./evolve/workflow-builder
+	./knowledge/r2g
+	./knowledge/reindex
+	./knowledge/skills
+	./knowledge/skills-rae
+	./platform/dashboard
+	./platform/dispatch
+	./platform/plugin-host
+	./platform/temporal
+	./platform/worker
 )

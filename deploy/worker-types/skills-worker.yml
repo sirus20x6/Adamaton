@@ -1,5 +1,10 @@
 # Worker-types catalog entry — skills-worker.
 #
+# DEPRECATED: superseded by adamaton-worker.yml (the unified
+# build-tag-configurable container). Kept for one release cycle so
+# `bin/adam deploy --rollback` can still spawn the standalone worker
+# from a previous umbrella SHA. New nodes should use adamaton-worker.
+#
 # Self-contained docker compose service block. Read by the deploy-agent's
 # /provision endpoint; embedded into the agent binary via go:embed.
 #
