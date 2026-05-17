@@ -733,11 +733,14 @@ ship_service_spec() {
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
         # Unified build-tag-configurable worker. Three variants share the
         # same Dockerfile + source tree; each variant pins a multi-stage
-        # --target and a GO_TAGS build-arg. The extra spec fields after
-        # the image name are: target|go_tags (parsed by cmd_ship).
-        adamaton-worker-light) echo "platform|platform/worker/Dockerfile|.|adamaton-worker-light|runtime-light|skills reindex dispatch" ;;
-        adamaton-worker-full)  echo "platform|platform/worker/Dockerfile|.|adamaton-worker-full|runtime-full|skills reindex dispatch evo" ;;
-        adamaton-worker-gpu)   echo "platform|platform/worker/Dockerfile|.|adamaton-worker-gpu|runtime-gpu|evo" ;;
+        # --target and a GO_TAGS build-arg, plus a final field naming
+        # the compose service that hosts the image (so deploy-agent
+        # restart targets the right service even when ship-spec key !=
+        # service name). 7-field spec:
+        #   sub_repo|dockerfile|context|image|target|go_tags|compose_service
+        adamaton-worker-light) echo "platform|platform/worker/Dockerfile|.|adamaton-worker-light|runtime-light|skills reindex dispatch|adamaton-worker" ;;
+        adamaton-worker-full)  echo "platform|platform/worker/Dockerfile|.|adamaton-worker-full|runtime-full|skills reindex dispatch evo|adamaton-worker" ;;
+        adamaton-worker-gpu)   echo "platform|platform/worker/Dockerfile|.|adamaton-worker-gpu|runtime-gpu|evo|adamaton-worker" ;;
         *)                     return 1 ;;
     esac
 }
@@ -746,16 +749,21 @@ cmd_ship() {
     [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
     load_ship_env
     local host="$1"; shift
-    local svc spec sub_repo dockerfile context image target go_tags tag dirty img_ref status
+    local svc spec sub_repo dockerfile context image target go_tags compose_svc service_name tag dirty img_ref status
     for svc in "$@"; do
         if ! spec="$(ship_service_spec "$svc")"; then
             die "no Dockerfile mapping for '$svc' (extend ship_service_spec in bin/adam)"
         fi
-        # 4-field (legacy) or 6-field (with multi-stage target + build-arg).
-        # IFS-read is happy with either: the optional fields fall through
-        # as empty strings.
-        target=""; go_tags=""
-        IFS='|' read -r sub_repo dockerfile context image target go_tags <<<"$spec"
+        # 4-field (legacy), 6-field (multi-stage target + build-arg), or
+        # 7-field (+ compose_service override for deploy-agent restart
+        # when the ship-spec key doesn't match the compose service name).
+        # IFS-read tolerates trailing empty fields.
+        target=""; go_tags=""; compose_svc=""
+        IFS='|' read -r sub_repo dockerfile context image target go_tags compose_svc <<<"$spec"
+        # service_name = what the deploy-agent's /restart endpoint
+        # expects. Defaults to the ship-spec key (matches every legacy
+        # entry); overridden to compose_svc when set (worker variants).
+        service_name="${compose_svc:-$svc}"
         local sub_path="$ADAM_ROOT/$sub_repo"
         [[ -d "$sub_path/.git" || -f "$sub_path/.git" ]] || die "sub-repo '$sub_repo' is not a git checkout"
 
@@ -790,18 +798,18 @@ cmd_ship() {
         # Caddy on the Pi terminates TLS with a self-signed/local cert that
         # the workstation may not have in its trust store, so use.
         # The bearer token still authenticates the request inside the agent.
-        local restart_url="$(host_deploy_url "$host")/restart?service=${svc}&tag=${tag}"
+        local restart_url="$(host_deploy_url "$host")/restart?service=${service_name}&tag=${tag}"
         echo "    POST $restart_url"
         local resp
         if ! resp="$(curl -fsS \
                 -X POST \
                 -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
                 "$restart_url" 2>&1)"; then
-            die "deploy-agent rejected restart of $svc on $host: $resp"
+            die "deploy-agent rejected restart of $service_name on $host: $resp"
         fi
 
         # Poll /deploy/status until the new tag appears (or 60s elapse).
-        local status_url="$(host_deploy_url "$host")/status?service=${svc}"
+        local status_url="$(host_deploy_url "$host")/status?service=${service_name}"
         local waited=0 ok=0
         while (( waited < 60 )); do
             sleep 5
