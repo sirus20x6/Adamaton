@@ -424,7 +424,11 @@ services:
       # DEPLOY_AGENT_TOKEN server-side, so the SPA never sees it.
       # Compose-internal name for pi5 (same network); LAN-routable
       # addresses for the others.
-      ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://pi5-speaker.local:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
+      # IP-based (not mDNS) because the dashboard runs in the docker
+      # network where Pi-internal .local names don't resolve. Override
+      # in .env if the LAN topology shifts. pi5 reaches its own agent
+      # via the compose service name.
+      ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://10.0.4.20:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
       DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN}
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
