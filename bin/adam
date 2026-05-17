@@ -80,6 +80,11 @@ Push-deploy (workstation registry -> deploy-agent on host):
                             Refuses to ship if the sub-repo is git-dirty.
   ship-self <host>          build + push deploy-agent and restart it on <host>
                             via ssh (the agent cannot self-restart safely).
+  sync-compose <host>       scp deploy/<host>/docker-compose.yml (+ .env.example)
+                            up to <host>:Adamaton-deploy/. Needed when compose-
+                            file changes (new env vars, new service blocks) must
+                            land on the host — bin/adam ship only pushes images.
+                            Recreate services manually afterwards.
 
   help [subcommand]
 EOF
@@ -864,6 +869,36 @@ cmd_ship_self() {
 #   - ssh <host>.lan works without a password prompt
 #   - the user on the host has passwordless sudo (for the daemon.json edit
 #     + docker restart). If not, the operator gets a password prompt.
+# cmd_sync_compose: scp deploy/<host>/docker-compose.yml (and
+# .env.example, for reference) up to the host's ~/Adamaton-deploy/
+# dir. `bin/adam ship` only pushes images — compose-file changes (new
+# env vars, new service blocks) need this to actually reach the Pi.
+#
+# Intentionally minimal: no rsync, no drift detection, no merging with
+# the host's docker-compose.override.yml. The operator is responsible
+# for `cd ~/Adamaton-deploy && docker compose up -d --force-recreate
+# --no-deps <svc>` afterwards to pick up the new env. (.env on the
+# host is not touched — it's secret-bearing and operator-owned.)
+cmd_sync_compose() {
+    [[ $# -eq 1 ]] || die "sync-compose: usage: adam sync-compose <host>"
+    local host="$1"
+    local src="$ADAM_ROOT/deploy/$host/docker-compose.yml"
+    [[ -f "$src" ]] || die "no compose file at $src"
+    local ssh; ssh="$(host_ssh_alias "$host")"
+    echo "==> sync-compose: $src -> $ssh:Adamaton-deploy/docker-compose.yml"
+    scp "$src" "$ssh:Adamaton-deploy/docker-compose.yml" || die "scp failed"
+    # .env.example is convenient as a reference for the operator; the
+    # real .env stays untouched on the host.
+    local env_src="$ADAM_ROOT/deploy/$host/.env.example"
+    if [[ -f "$env_src" ]]; then
+        echo "==> sync-compose: $env_src -> $ssh:Adamaton-deploy/.env.example"
+        scp "$env_src" "$ssh:Adamaton-deploy/.env.example" || echo "    warning: env.example scp failed (non-fatal)" >&2
+    fi
+    echo
+    echo "Compose synced. To apply env changes for a service:"
+    echo "  ssh $ssh 'cd Adamaton-deploy && docker compose up -d --force-recreate --no-deps <service>'"
+}
+
 cmd_bootstrap() {
     [[ $# -eq 1 ]] || die "bootstrap: usage: adam bootstrap <host>"
     local host="$1"
@@ -1071,9 +1106,10 @@ case "$1" in
     clean)      shift; cmd_clean "$@" ;;
     rescue)     shift; cmd_rescue "$@" ;;
     fleet)      shift; cmd_fleet "$@" ;;
-    ship)       shift; cmd_ship "$@" ;;
-    ship-self)  shift; cmd_ship_self "$@" ;;
-    bootstrap)  shift; cmd_bootstrap "$@" ;;
+    ship)         shift; cmd_ship "$@" ;;
+    ship-self)    shift; cmd_ship_self "$@" ;;
+    sync-compose) shift; cmd_sync_compose "$@" ;;
+    bootstrap)    shift; cmd_bootstrap "$@" ;;
     help|-h|--help) usage ;;
     *) die "unknown subcommand '$1'; try 'adam help'" ;;
 esac
