@@ -731,6 +731,7 @@ ship_service_spec() {
         nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
+        dataset-worker)        echo "evolve|evolve/dataset-manager/Dockerfile|.|adamaton-dataset-worker" ;;
         # Unified build-tag-configurable worker. Three variants share the
         # same Dockerfile + source tree; each variant pins a multi-stage
         # --target and a GO_TAGS build-arg, plus a final field naming

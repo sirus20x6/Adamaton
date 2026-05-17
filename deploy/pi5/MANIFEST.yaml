@@ -32,6 +32,7 @@ services:
   - plugin-host
   - evo-api
   - deploy-agent
+  - dataset-worker      # evolve/dataset-manager — local + HF importers, S3/MinIO blob storage
   # Standalone worker services. Kept allow-listed for one release
   # cycle so `bin/adam deploy --rollback` to a pre-consolidation SHA
   # can still drive their restarts; remove after the rollback window
