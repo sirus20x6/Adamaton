@@ -151,6 +151,28 @@ pi-adamaton-worker: ## Cross-compile evo-worker for linux/arm64 (Pi 5)
 	cd evolve/evolve && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(GOFLAGS) -o ../$(BINARY_DIR)/evo-worker.arm64 ./cmd/evo-worker
 	@echo "✅ evo-worker (arm64) built: $(BINARY_DIR)/evo-worker.arm64"
 
+# ---------------------------------------------------------------------------
+# Unified build-tag-configurable worker (platform/worker/). One source
+# tree, three published variants. These targets build the standalone
+# binary for local testing; production builds go through
+# `bin/adam ship pi5 adamaton-worker-<variant>` which uses the
+# multi-stage Dockerfile.
+# ---------------------------------------------------------------------------
+pi-adamaton-worker-light: ## Cross-compile adamaton-worker (light: skills+reindex+dispatch) for linux/arm64
+	@mkdir -p $(BINARY_DIR)
+	cd platform/worker && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(GOFLAGS) -tags 'skills reindex dispatch' -o ../../$(BINARY_DIR)/adamaton-worker-light.arm64 ./cmd/adamaton-worker
+	@echo "✅ adamaton-worker-light (arm64) built: $(BINARY_DIR)/adamaton-worker-light.arm64"
+
+pi-adamaton-worker-full: ## Cross-compile adamaton-worker (full: light + evo) for linux/arm64
+	@mkdir -p $(BINARY_DIR)
+	cd platform/worker && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build $(GOFLAGS) -tags 'skills reindex dispatch evo' -o ../../$(BINARY_DIR)/adamaton-worker-full.arm64 ./cmd/adamaton-worker
+	@echo "✅ adamaton-worker-full (arm64) built: $(BINARY_DIR)/adamaton-worker-full.arm64"
+
+pi-adamaton-worker-gpu: ## Cross-compile adamaton-worker (gpu: evo-only) for linux/amd64
+	@mkdir -p $(BINARY_DIR)
+	cd platform/worker && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(GOFLAGS) -tags 'evo' -o ../../$(BINARY_DIR)/adamaton-worker-gpu.amd64 ./cmd/adamaton-worker
+	@echo "✅ adamaton-worker-gpu (amd64) built: $(BINARY_DIR)/adamaton-worker-gpu.amd64"
+
 # pi-arxiv-skip cross-compiles the Zig sidecar (tools/arxiv-skip) for
 # the Pi. The output lives at tools/arxiv-skip/zig-out/bin/arxiv-skip
 # (statically linked aarch64 ELF), ready to be copied next to the
@@ -160,7 +182,7 @@ pi-arxiv-skip: ## Cross-compile arxiv-skip sidecar for linux/arm64 (Pi 5)
 	cd knowledge/tools/arxiv-skip && zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseSmall
 	@echo "✅ arxiv-skip (arm64) built: tools/arxiv-skip/zig-out/bin/arxiv-skip"
 
-.PHONY: pi-dispatch-worker pi-evo-worker pi-arxiv-skip latex2text pi-latex2text
+.PHONY: pi-dispatch-worker pi-evo-worker pi-adamaton-worker-light pi-adamaton-worker-full pi-adamaton-worker-gpu pi-arxiv-skip latex2text pi-latex2text
 
 # Zig CLI for arxiv LaTeX → JSON, replaces pandoc on the deepresearch fast path.
 # Native build is used for development/benchmarking; pi target ships a static

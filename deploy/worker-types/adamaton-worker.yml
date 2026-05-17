@@ -1,0 +1,44 @@
+# Worker-types catalog entry — adamaton-worker (unified).
+#
+# One container hosts N Temporal queue processes. s6-overlay inside the
+# image supervises one adamaton-worker --queue=<q> per entry in
+# $WORKER_QUEUES so a crash in one queue restarts only that queue.
+# Compose nodes pin a variant by setting ADAMATON_WORKER_TAG to one
+# of light-<sha>, full-<sha>, gpu-<sha>:
+#
+#   light  — skills, reindex-ingest, reindex-extract, dispatch
+#   full   — light + evo (image includes python3 for the kernel evaluator)
+#   gpu    — evo only, for nvidia-container-runtime nodes
+#
+# Per-host vars driving compose substitution (set in each host's .env):
+#   pi5:         WORKER_HOSTNAME=pi          WORKER_POSTGRES_HOST=postgres   WORKER_TEMPORAL_HOST=temporal   WORKER_QUEUES=skills,reindex-ingest,reindex-extract,dispatch
+#   pi5-speaker: WORKER_HOSTNAME=pi5-speaker WORKER_POSTGRES_HOST=10.0.4.30  WORKER_TEMPORAL_HOST=10.0.4.30  WORKER_QUEUES=...
+#   blackwell:   WORKER_HOSTNAME=blackwell   WORKER_POSTGRES_HOST=10.0.4.30  WORKER_TEMPORAL_HOST=10.0.4.30  WORKER_QUEUES=evo
+#
+# Per-queue Postgres DSNs are read by each queue process. The reindex
+# DSN points at the deepresearch DB on port 5433; skills/dispatch/evo
+# share the evo DB on 5432.
+#
+# Intentionally NO depends_on — the catalog has to work on hosts that
+# don't run postgres/temporal locally. Each queue retries the dial on
+# startup until success.
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker:${ADAMATON_WORKER_TAG:-light-main}
+  env_file: [.env, image-tags.env]
+  environment:
+    WORKER_QUEUES: ${WORKER_QUEUES:-skills,reindex-ingest,reindex-extract,dispatch}
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5433/deepresearch?sslmode=disable
+    POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    SKILLS_R2R_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    SKILLS_R2R_ENABLED: "true"
+    PLATFORM_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    R2G_URL: http://${WORKER_R2G_HOST:-r2g}:7373
+    DEEPRESEARCH_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    EVO_KERNEL_REMOTE_HOST: ${WORKER_EVO_KERNEL_REMOTE_HOST:-}
+    LOG_LEVEL: info
+  restart: unless-stopped
