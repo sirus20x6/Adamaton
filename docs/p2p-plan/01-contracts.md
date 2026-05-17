@@ -108,6 +108,7 @@ type Reputation struct {
 type AuditOutcome struct {
     ID          AuditID
     JobID       JobID
+    Worker      NodeID     // worker whose output was audited; AuditEngine populates from job.Worker
     Verifiers   []NodeID
     Similarity  float64    // 0..1 (1.0 = bit-exact)
     Pass        bool

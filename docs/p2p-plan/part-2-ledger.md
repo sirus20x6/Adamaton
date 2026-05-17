@@ -149,9 +149,12 @@ or a separate controller). You only expose the setter and getter.
 ### 2.7 Unit tests — `core/p2p/ledger/ledger_test.go`
 
 - **Honest job flow:** Deposit 100 USDC → LockForJob 10 USDC →
-  ReleaseFromJob(0.0) → SettleJob with networkTax=0.01, poolTax=0.02 →
-  assert: Available is `90 + (10 * 0.97) = 99.7 USDC`, reserve is
-  `0.3 USDC`.
+  ReleaseFromJob(0.0) → SettleJob with `value=10 USDC, networkTax=0.01,
+  poolTax=0.02` → assert: Available is `100 + 10 * 0.97 = 109.7 USDC`
+  (released stake 10 + settled payment 9.7), reserve is `0.3 USDC`.
+  Note that Release returns the locked stake to Available AND Settle adds
+  a separate payment of `value - tax` — they are independent flows; the
+  released stake is not the source of the settled payment.
 - **Full slash:** Deposit 100 → LockForJob 10 → ReleaseFromJob(1.0) →
   assert reserve = 10, Available = 90, no SettleJob possible.
 - **Partial slash:** Deposit 100 → LockForJob 10 → ReleaseFromJob(0.5) →
