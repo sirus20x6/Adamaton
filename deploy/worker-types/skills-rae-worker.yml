@@ -7,10 +7,12 @@
 
 service:
   hostname: ${WORKER_HOSTNAME:-unknown}
-  # Shares the adamaton-skills-rae image with the service of the same
-  # name; entrypoint differentiates. Mirrors the nano-research-worker
-  # / nano-research pattern.
-  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae:${ADAMATON_SKILLS_RAE_TAG:-main}
+  # adamaton-skills-rae-worker image (built from the same Dockerfile as
+  # the skills-rae service) bakes BOTH binaries. The image's default
+  # ENTRYPOINT points at skills-rae (the service), so this block has to
+  # override entrypoint to pick the worker binary. Mirrors the
+  # nano-research-worker pattern.
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae-worker:${ADAMATON_SKILLS_RAE_WORKER_TAG:-main}
   env_file: [.env, image-tags.env]
   entrypoint: ["/usr/local/bin/skills-rae-worker"]
   environment:
