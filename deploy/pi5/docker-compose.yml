@@ -121,6 +121,11 @@ services:
       R2G_PORT: "7373"
       R2G_PPROF_PORT: "7374"
       R2G_LOG_FORMAT: json
+      # BGE_EMBED_URL points at the native llama-server bge-embed (port
+      # 8092). BGE_SIDECAR_URL kept as fallback during migration; will
+      # be removed once the Python sidecar's LOAD_EMBED_MODEL flips to
+      # false.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       LATEX2TEXT_BIN: /app/bin/latex2text
       OPENAI_API_BASE: ${OPENAI_API_BASE:-http://10.0.4.37:9080/v1}
@@ -147,6 +152,9 @@ services:
       SKILLS_RAE_PORT: "7376"
       SKILLS_RAE_PPROF_PORT: "7377"
       SKILLS_RAE_LOG_FORMAT: json
+      # BGE_EMBED_URL points at the native llama-server bge-embed.
+      # BGE_SIDECAR_URL kept as fallback until LOAD_EMBED_MODEL flips.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       SKILLS_RAE_EMBED_MODEL: bge-m3
     extra_hosts:
@@ -166,6 +174,9 @@ services:
     env_file: [.env, image-tags.env]
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # BGE_EMBED_URL points at the native llama-server bge-embed.
+      # BGE_SIDECAR_URL kept as fallback until LOAD_EMBED_MODEL flips.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       SKILLS_RAE_EMBED_MODEL: bge-m3
       TEMPORAL_ADDRESS: temporal:7233

@@ -705,6 +705,11 @@ ship_service_spec() {
         plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
         dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|.|adamaton-dispatch-worker" ;;
         deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|.|adamaton-deploy-agent" ;;
+        # bge-embed wraps llama-server + bakes the bge-m3 GGUF in. The
+        # build context can be the tiny platform/bge-embed/ dir because
+        # the Dockerfile is FROM ggml-org/llama.cpp:server-cuda + ADD —
+        # no cross-module Go sources to pull in.
+        bge-embed)             echo "platform|platform/bge-embed/Dockerfile|platform/bge-embed|adamaton-bge-embed" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
         backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
