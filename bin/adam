@@ -712,7 +712,7 @@ ship_service_spec() {
         skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae" ;;
         skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae-worker" ;;
         skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|knowledge/skills|adamaton-skills-worker" ;;
-        reindex-worker)        echo "knowledge|knowledge/reindex/Dockerfile|knowledge/reindex|adamaton-reindex-worker" ;;
+        reindex-worker)        echo "knowledge|knowledge/reindex/Dockerfile|.|adamaton-reindex-worker" ;;
         nano-research)         echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
