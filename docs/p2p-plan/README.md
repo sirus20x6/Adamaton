@@ -121,12 +121,25 @@ whose branches predate the change.
 
 ## After all 4 parts ship
 
-The user reassesses direction. Possible next moves:
-- Wire stubs → real engines in Part 1's integration test, verify end-to-end
-- Add real cryptographic identity (Ed25519 signatures on jobs)
-- Add real networking (libp2p)
-- Move to a real chain settlement layer
-- Build a control law that adjusts network tax rate based on insurance
-  reserve depletion
+v0 is done. The next phase is v1, which moves from in-memory simulation
+to real on-chain backings.
 
-None of those are in v0 scope.
+## v1: ETH on Base — design strawman
+
+See [`v1-eth-foundation.md`](v1-eth-foundation.md) for the v1.0 design
+doc. It replaces the in-memory `LedgerEngine` and `FederationEngine` with
+smart contracts on Base (L2), introduces oracle-driven USD-equivalent
+accounting (with native ETH as the settlement asset), and ships the
+bootstrap mechanics (donation-mint, premined founder credit, per-client
+credit lines) that were left as design opens in v0.
+
+v1.0 is the foundation. Two follow-on phases are sketched in the same doc:
+
+- **v1.1** — EIP-5564 stealth addresses on the payment path + ERC-4337
+  AA paymaster for gas-payer privacy.
+- **v1.2** — ZK reputation via Semaphore-based group proofs (Federation
+  reputation goes from plaintext to commitment-tree).
+
+The asset-neutral `Settler` abstraction introduced in v1.0 leaves the
+door open for v2.x to add Monero (or any other asset) as a second
+settlement adapter without touching protocol-internal code.
