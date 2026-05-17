@@ -25,6 +25,10 @@ services:
     # reference ADAMATON_NANO_RESEARCH_TAG.
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
     env_file: [.env, image-tags.env]
+    # Pin os.Hostname() so the worker registry groups this node under
+    # "pi5-speaker" rather than the random docker container-id default.
+    # Mirrors deploy/pi5/docker-compose.yml which pins hostname: pi.
+    hostname: pi5-speaker
     entrypoint: ["/usr/local/bin/nano-research-worker"]
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST}:5432/${POSTGRES_DB:-postgres}?sslmode=disable

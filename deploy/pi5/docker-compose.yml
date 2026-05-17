@@ -374,6 +374,12 @@ services:
       - "7375"
     volumes:
       - ./plugin-manifests:/etc/deepresearch/plugins:ro
+      # Python plugin payloads (search/zotero/etc.) — bind-mounted into
+      # the path plugin-host reads via PH_PLUGIN_PAYLOADS_DIR (default
+      # /opt/dr-plugins). Operator drops a symlink at
+      # ~/Adamaton-deploy/platform-plugins pointing at the source dir,
+      # so plugin code can be swapped without rebuilding the image.
+      - ./platform-plugins:/opt/dr-plugins:ro
       - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
