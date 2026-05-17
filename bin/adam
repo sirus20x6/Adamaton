@@ -679,6 +679,17 @@ host_deploy_url() {
     echo "http://${target}:9128"
 }
 
+# host_platform <host>: docker buildx --platform value. Honors
+# HOST_PLATFORM_<UPPER> (e.g. HOST_PLATFORM_BLACKWELL=linux/amd64),
+# defaults to linux/arm64 (the Pi default). Used by ship + ship-self
+# + bootstrap so amd64 hosts don't end up with qemu-emulated arm64
+# images.
+host_platform() {
+    local h="$1" key
+    key="HOST_PLATFORM_$(echo "$h" | tr 'a-z-' 'A-Z_')"
+    echo "${!key:-linux/arm64}"
+}
+
 # service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
 # sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
 # the source (used for SHA tag + dirty check). image_name is the registry
@@ -735,7 +746,7 @@ cmd_ship() {
         echo "==> ship: $svc -> $img_ref:$tag"
 
         if ! docker buildx build \
-            --platform linux/arm64 \
+            --platform "$(host_platform "$host")" \
             --push \
             -t "$img_ref:$tag" \
             -t "$img_ref:main" \
@@ -797,7 +808,7 @@ cmd_ship_self() {
     echo "==> ship-self: deploy-agent -> $img_ref:$tag on $host"
 
     if ! docker buildx build \
-        --platform linux/arm64 \
+        --platform "$(host_platform "$host")" \
         --push \
         -t "$img_ref:$tag" \
         -t "$img_ref:main" \
@@ -955,7 +966,7 @@ EOF_DAEMON
     # --load instead of --push, then docker save | ssh docker load.
     echo "    [6/8] building bootstrap deploy-agent (arm64, local load)"
     if ! docker buildx build \
-            --platform linux/arm64 \
+            --platform "$(host_platform "$host")" \
             --load \
             -t "adamaton-deploy-agent:bootstrap" \
             -f "$ADAM_ROOT/platform/deploy-agent/Dockerfile" \
