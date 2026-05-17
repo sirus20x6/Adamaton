@@ -7,8 +7,12 @@
 
 service:
   hostname: ${WORKER_HOSTNAME:-unknown}
-  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae-worker:${ADAMATON_SKILLS_RAE_WORKER_TAG:-main}
+  # Shares the adamaton-skills-rae image with the service of the same
+  # name; entrypoint differentiates. Mirrors the nano-research-worker
+  # / nano-research pattern.
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-rae:${ADAMATON_SKILLS_RAE_TAG:-main}
   env_file: [.env, image-tags.env]
+  entrypoint: ["/usr/local/bin/skills-rae-worker"]
   environment:
     SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
     BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://workstation:8089}

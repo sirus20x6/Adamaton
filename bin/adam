@@ -703,20 +703,20 @@ ship_service_spec() {
         # etc. Multi-stage build needs every sub-repo in the build context.
         dashboard)             echo "platform|platform/dashboard/Dockerfile|.|adamaton-dashboard" ;;
         plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
-        dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|platform/dispatch|adamaton-dispatch-worker" ;;
+        dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|.|adamaton-dispatch-worker" ;;
         deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|.|adamaton-deploy-agent" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
         backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|knowledge/r2g|adamaton-r2g" ;;
-        skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae" ;;
-        skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae-worker" ;;
-        skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|knowledge/skills|adamaton-skills-worker" ;;
+        skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae" ;;
+        skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae-worker" ;;
+        skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|.|adamaton-skills-worker" ;;
         reindex-worker)        echo "knowledge|knowledge/reindex/Dockerfile|.|adamaton-reindex-worker" ;;
         nano-research)         echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
-        evo-worker)            echo "evolve|evolve/evolve/Dockerfile|evolve/evolve|adamaton-evo-worker" ;;
+        evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
         *)                     return 1 ;;
     esac
 }
