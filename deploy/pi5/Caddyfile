@@ -166,7 +166,59 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
     }
 }
 
+# LDR (Local Deep Research, upstream Python) — temporary edge route for the
+# Phase A Go bridge integration. The whole site is proxied verbatim, but
+# API endpoints are gated at the edge by an X-LDR-API-Key header check
+# (we're not building LDR ourselves so we can't ship a Flask middleware).
+# The browser UI keeps its own login + Flask-WTF CSRF; only the Go bridge
+# (task A.1) talks to /research/api/* and /api/*, and it sets the header
+# on every call. Removed in Phase B.9 after parity gate.
+ldr.local, ldr {
+    tls internal
+
+    encode gzip
+
+    # API endpoints require X-LDR-API-Key. The bridge from nano-research
+    # sets this header on every call; browser users hit /auth/login first
+    # and the cookie-protected UI under /, which keeps Flask-WTF CSRF.
+    @ldr_api {
+        path /research/api/* /api/*
+    }
+    @ldr_api_authed {
+        path /research/api/* /api/*
+        header X-LDR-API-Key {env.LDR_API_KEY}
+    }
+    handle @ldr_api_authed {
+        reverse_proxy ldr:5000 {
+            transport http {
+                # LDR research jobs can run several minutes; mirror the long
+                # read_timeout used by nano-research.
+                read_timeout 1800s
+            }
+        }
+    }
+    handle @ldr_api {
+        respond "unauthorized" 401
+    }
+
+    # Everything else (browser UI, static, /auth, /health) passes through
+    # untouched. Browser-side CSRF and login remain authoritative for users.
+    handle {
+        reverse_proxy ldr:5000 {
+            transport http {
+                read_timeout 1800s
+            }
+        }
+    }
+}
+
 # Plain HTTP → HTTPS redirect; also catches LAN-IP bookmarks.
 http://deepresearch.local, http://deepresearch, http://adamomaton.local, http://adamomaton, http://10.0.4.30, http://10.0.4.31 {
     redir https://adamomaton.local{uri} permanent
+}
+
+# Separate HTTP → HTTPS redirect for ldr.local so it stays on its own host
+# (the main redirect above hard-codes adamomaton.local as the destination).
+http://ldr.local, http://ldr {
+    redir https://ldr.local{uri} permanent
 }
