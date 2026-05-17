@@ -702,7 +702,7 @@ ship_service_spec() {
         # replace directives that reach across to ../../core, ../../knowledge,
         # etc. Multi-stage build needs every sub-repo in the build context.
         dashboard)             echo "platform|platform/dashboard/Dockerfile|.|adamaton-dashboard" ;;
-        plugin-host)           echo "platform|platform/plugin-host/Dockerfile|platform/plugin-host|adamaton-plugin-host" ;;
+        plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
         dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|platform/dispatch|adamaton-dispatch-worker" ;;
         deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|platform/deploy-agent|adamaton-deploy-agent" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
@@ -713,8 +713,8 @@ ship_service_spec() {
         skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|knowledge/skills-rae|adamaton-skills-rae-worker" ;;
         skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|knowledge/skills|adamaton-skills-worker" ;;
         reindex-worker)        echo "knowledge|knowledge/reindex/Dockerfile|knowledge/reindex|adamaton-reindex-worker" ;;
-        nano-research)         echo "deepresearch|deepresearch/nano-research/Dockerfile|deepresearch/nano-research|adamaton-nano-research" ;;
-        nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|deepresearch/nano-research|adamaton-nano-research" ;;
+        nano-research)         echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
+        nano-research-worker)  echo "deepresearch|deepresearch/nano-research/Dockerfile|.|adamaton-nano-research" ;;
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|evolve/evolve|adamaton-evo-worker" ;;
         *)                     return 1 ;;
