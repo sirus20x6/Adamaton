@@ -418,6 +418,14 @@ services:
       # directly. Operators wanting a host-mounted override can still
       # set EVO_PLUGIN_DIRS (colon-separated) here.
       EVO_HOME: /opt/evo
+      # Per-host deploy-agent base URLs. Consumed by the /api/v1/nodes
+      # endpoints to proxy "spin up another worker" requests from the
+      # SPA to the right rack's agent. The dashboard injects
+      # DEPLOY_AGENT_TOKEN server-side, so the SPA never sees it.
+      # Compose-internal name for pi5 (same network); LAN-routable
+      # addresses for the others.
+      ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://pi5-speaker.local:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
+      DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN}
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
