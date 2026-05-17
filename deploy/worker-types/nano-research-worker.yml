@@ -1,0 +1,31 @@
+# Worker-types catalog entry — nano-research-worker. Shares the
+# adamaton-nano-research image with the HTTP service of the same name;
+# entrypoint differentiates.
+#
+# Carries `extra_hosts` because QWEN_BASE_URL + figure-renderer URL
+# routes resolve workstation/figure-renderer aliases.
+#
+# Declares its own named volume so cold-start on a fresh host works
+# without operator pre-flight.
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
+  env_file: [.env, image-tags.env]
+  entrypoint: ["/usr/local/bin/nano-research-worker"]
+  environment:
+    NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    QWEN_BASE_URL: ${QWEN_BASE_URL:-http://10.0.4.37:9080/v1}
+    QWEN_MODEL: ${QWEN_MODEL:-qwen3.6-27b-nvfp8}
+    QWEN_MODEL_ID: ${QWEN_MODEL_ID:-qwen3.6-27b-nvfp8}
+    SKILLS_RAE_URL: http://${WORKER_SKILLS_RAE_HOST:-skills-rae}:7376
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
+    FIGURE_RENDERER_URL: ${FIGURE_RENDERER_URL:-http://figure-renderer:8090}
+    NANO_WORKER_LABEL: ${WORKER_HOSTNAME:-unknown}
+  extra_hosts:
+    - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+  volumes:
+    - nano_workspace:/var/lib/nano-research
+  restart: unless-stopped
