@@ -406,6 +406,12 @@ services:
       DEEPRESEARCH_URL: http://backend:7272
       CCSAVER_DB: /data/ccsaver/data.db
       DASHBOARD_BASE_PATH: /evo-api
+      # Workflow-node catalog is baked into the image at
+      # /opt/evo/plugins/{builtin,community,n8n}. EVO_HOME makes the
+      # apiserver's resolvePluginDirs() pick that canonical layout
+      # directly. Operators wanting a host-mounted override can still
+      # set EVO_PLUGIN_DIRS (colon-separated) here.
+      EVO_HOME: /opt/evo
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
