@@ -259,15 +259,22 @@ core/p2p/cppexample/cxx/README.md
 ## When you're done
 
 ```bash
+# Publish your branch so other orchestrators can see it
+git push -u origin <your-branch>           # branch shown by 'bin/adam claim'
+# Clean up the worktree but keep the branch on disk
 bin/adam release core/p2p-foundation --keep-branch
 ```
 
-(`--keep-branch` keeps the branch pushed without removing the worktree —
-we're not merging yet.)
+(We're NOT merging yet — no PR. `git push` is so the user and Parts 2/3/4
+can fetch your iface commits. `bin/adam release --keep-branch` removes the
+worktree directory but preserves the branch.)
 
-Surface to the user: "Foundation done, branch `<you>/p2p-foundation` ready
-for review. Stubs and iface/ are committed early on the branch; Parts 2/3/4
-can rebase against them."
+**Important:** push the `types/` and `iface/` commits as EARLY as possible
+(within the first hour or two) so Parts 2/3/4 can rebase against them.
+Don't wait until you're done with everything.
+
+Surface to the user: "Foundation done, branch pushed. Stubs and iface/
+landed early; Parts 2/3/4 can rebase against them."
 
 ## Suggested subagent splits
 

@@ -356,11 +356,15 @@ core/p2p/audit/doc.go                         (package godoc summary)
 ## When you're done
 
 ```bash
+git push -u origin <your-branch>           # branch shown by 'bin/adam claim'
 bin/adam release core/p2p-audit --keep-branch
 ```
 
-Surface to the user: "Audit done, branch `<you>/p2p-audit` ready. C++ hot
-path lives at `core/p2p/audit/cxx/`; cgo builds it inline via `go build`."
+(We're NOT merging yet — no PR. `git push` publishes your branch; release
+with `--keep-branch` removes the worktree but preserves the branch.)
+
+Surface to the user: "Audit done, branch pushed. C++ hot path lives at
+`core/p2p/audit/cxx/`; cgo builds it inline via `go build`."
 
 ## Suggested subagent splits
 

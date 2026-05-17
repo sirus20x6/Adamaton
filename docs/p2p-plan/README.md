@@ -55,8 +55,10 @@ Part 3's C++ work follows the cgo pattern Part 1 establishes in
 ## Critical rules
 
 - **No merges yet.** The user has said: "see how far we can get before the
-  first code merge, then reassess." All branches push with `bin/adam
-  release <scope>/<task> --keep-branch`; no PRs without explicit go-ahead.
+  first code merge, then reassess." Each orchestrator publishes their work
+  with `git push -u origin <branch>` and then `bin/adam release
+  <scope>/<task> --keep-branch` (which removes the worktree but preserves
+  the branch). No PRs without explicit go-ahead.
 
 - **No interface changes without approval.** If your implementation reveals
   a needed interface change, STOP and surface to the user. Don't edit

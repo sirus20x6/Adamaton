@@ -273,6 +273,9 @@ without checking in.
 - **No `Co-Authored-By:` trailers.** Hook-enforced.
 - **No `--no-verify` or hook-skipping.** Hook-enforced.
 - **No `@`-mentions in commit message bodies.** Hook-enforced.
-- **`bin/adam release <scope>/<task> --keep-branch`** when your part is done
-  — pushes the branch without removing the worktree, since we're not merging
-  yet.
+- **Publishing your work:** `git push -u origin <branch>` (the branch name
+  is printed by `bin/adam claim`), then `bin/adam release <scope>/<task>
+  --keep-branch`. The push makes your branch visible to the user and the
+  other orchestrators; the release removes your worktree but keeps the
+  branch on disk (with `--keep-branch`). We are NOT merging yet, so do
+  not open a PR.

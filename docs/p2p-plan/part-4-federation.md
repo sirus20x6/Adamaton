@@ -270,10 +270,14 @@ core/p2p/federation/doc.go               (package godoc summary)
 ## When you're done
 
 ```bash
+git push -u origin <your-branch>           # branch shown by 'bin/adam claim'
 bin/adam release core/p2p-federation --keep-branch
 ```
 
-Surface to the user: "Federation done, branch `<you>/p2p-federation` ready."
+(We're NOT merging yet — no PR. `git push` publishes your branch; release
+with `--keep-branch` removes the worktree but preserves the branch.)
+
+Surface to the user: "Federation done, branch pushed."
 
 ## Suggested subagent splits
 
