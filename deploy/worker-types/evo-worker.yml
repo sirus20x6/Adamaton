@@ -1,0 +1,21 @@
+# Worker-types catalog entry — evo-worker.
+#
+# EVO_KERNEL_REMOTE_HOST is left blank by default so the worker only
+# handles the cheap activities. The blackwell deployment overrides it
+# via env to run kernel evals locally. Spinning up an evo-worker on a
+# Pi via the dialog inherits the empty default, which is the safe
+# behaviour (Pi has no GPU to dispatch to).
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
+  env_file: [.env, image-tags.env]
+  environment:
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    EVO_TASK_QUEUE: evo
+    DEEPRESEARCH_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    LOG_LEVEL: info
+    EVO_KERNEL_REMOTE_HOST: ${EVO_KERNEL_REMOTE_HOST:-}
+  restart: unless-stopped

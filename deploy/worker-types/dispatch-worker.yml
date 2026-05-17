@@ -1,0 +1,13 @@
+# Worker-types catalog entry — dispatch-worker. Pure compute fan-out
+# off the evo Temporal queue; only needs postgres + temporal.
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-dispatch-worker:${ADAMATON_DISPATCH_WORKER_TAG:-main}
+  env_file: [.env, image-tags.env]
+  environment:
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    LOG_LEVEL: info
+  restart: unless-stopped

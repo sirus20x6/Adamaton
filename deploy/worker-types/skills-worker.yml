@@ -1,0 +1,27 @@
+# Worker-types catalog entry — skills-worker.
+#
+# Self-contained docker compose service block. Read by the deploy-agent's
+# /provision endpoint; embedded into the agent binary via go:embed.
+#
+# Uses compose-native ${VAR} substitution only. The WORKER_* vars are
+# defined per-host in each host's .env so the same template lands the
+# right values on every node:
+#   pi5:         WORKER_HOSTNAME=pi          WORKER_POSTGRES_HOST=postgres   WORKER_TEMPORAL_HOST=temporal
+#   pi5-speaker: WORKER_HOSTNAME=pi5-speaker WORKER_POSTGRES_HOST=10.0.4.30  WORKER_TEMPORAL_HOST=10.0.4.30
+#
+# Intentionally NO depends_on -- the catalog has to work on hosts that
+# don't run postgres/temporal locally. The worker retries the postgres
+# connection on startup until success, which covers cold boot.
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-worker:${ADAMATON_SKILLS_WORKER_TAG:-main}
+  env_file: [.env, image-tags.env]
+  environment:
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    SKILLS_R2R_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    SKILLS_R2R_ENABLED: "true"
+    LOG_LEVEL: info
+  restart: unless-stopped

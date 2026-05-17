@@ -704,7 +704,7 @@ ship_service_spec() {
         dashboard)             echo "platform|platform/dashboard/Dockerfile|.|adamaton-dashboard" ;;
         plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
         dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|platform/dispatch|adamaton-dispatch-worker" ;;
-        deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|platform/deploy-agent|adamaton-deploy-agent" ;;
+        deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|.|adamaton-deploy-agent" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
         backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
@@ -813,7 +813,7 @@ cmd_ship_self() {
         -t "$img_ref:$tag" \
         -t "$img_ref:main" \
         -f "$ADAM_ROOT/platform/deploy-agent/Dockerfile" \
-        "$ADAM_ROOT/platform/deploy-agent"; then
+        "$ADAM_ROOT"; then
         die "buildx failed for deploy-agent"
     fi
 
@@ -970,7 +970,7 @@ EOF_DAEMON
             --load \
             -t "adamaton-deploy-agent:bootstrap" \
             -f "$ADAM_ROOT/platform/deploy-agent/Dockerfile" \
-            "$ADAM_ROOT/platform/deploy-agent"; then
+            "$ADAM_ROOT"; then
         die "buildx --load failed for deploy-agent bootstrap"
     fi
 

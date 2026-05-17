@@ -1,0 +1,19 @@
+# Worker-types catalog entry — reindex-worker. See skills-worker.yml
+# for the WORKER_* var conventions.
+#
+# PLATFORM_BASE_URL + R2G_URL default to the pi5 compose-internal names;
+# override via env to use LAN addresses (e.g. PLATFORM_BASE_URL=
+# http://10.0.4.30:7272 on a non-pi5 host).
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-reindex-worker:${ADAMATON_REINDEX_WORKER_TAG:-main}
+  env_file: [.env, image-tags.env]
+  environment:
+    TEMPORAL_ADDRESS: ${WORKER_TEMPORAL_HOST:-temporal}:7233
+    TEMPORAL_NAMESPACE: default
+    REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    PLATFORM_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
+    R2G_URL: http://${WORKER_R2G_HOST:-r2g}:7373
+    LOG_LEVEL: info
+  restart: unless-stopped
