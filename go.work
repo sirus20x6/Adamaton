@@ -12,6 +12,7 @@ use (
 	./deepresearch/nano-research
 	./delegator/delegator
 	./delegator/mcp
+	./evolve/dataset-manager
 	./evolve/evolve
 	./evolve/workflow-builder
 	./knowledge/r2g
