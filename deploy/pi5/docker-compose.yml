@@ -246,8 +246,6 @@ services:
         condition: service_healthy
       temporal:
         condition: service_started
-      backend:
-        condition: service_healthy
     restart: unless-stopped
 
   reindex-worker:
@@ -266,8 +264,6 @@ services:
         condition: service_healthy
       temporal:
         condition: service_started
-      backend:
-        condition: service_healthy
     restart: unless-stopped
 
   reranker:
@@ -364,67 +360,19 @@ services:
     restart: unless-stopped
 
   # ---- platform sub-repo --------------------------------------------------
-  backend:
-    init: true
-    # Python R2R backend. Still built from the platform sub-repo until the
-    # planned platform/backend → Go cutover lands.
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-platform-backend:${ADAMATON_BACKEND_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      R2R_CONFIG_PATH: /app/configs/platform.toml
-      PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
-      REDIS_URL: redis://redis:6379
-      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
-      OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
-      RESEARCH_USE_OCTEN_RETRIEVAL: "true"
-      RESEARCH_RERANK_TIMEOUT: "30"
-      LITELLM_LOG: ${LITELLM_LOG:-INFO}
-      R2R_POSTGRES_MAX_CONNECTIONS: "40"
-      SEARXNG_URL: http://searxng:8080
-      R2R_INTERNAL_URL: http://r2g:7373
-    extra_hosts:
-      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "7272:7272"
-    volumes:
-      - dr_uploads:/var/lib/dr-uploads:rw
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7272/platform/health || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 30
-      start_period: 1800s
-    restart: unless-stopped
-
-  worker-lo:
-    # Shares the adamaton-platform-backend image with the backend service
-    # above; entrypoint differs. Tag stays in sync via ADAMATON_BACKEND_TAG.
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-platform-backend:${ADAMATON_BACKEND_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      R2R_CONFIG_PATH: /app/configs/platform.toml
-      PLATFORM_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
-      REDIS_URL: redis://redis:6379
-      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
-      OCTEN_SIDECAR_URL: ${OCTEN_SIDECAR_URL:-http://10.0.4.37:8090}
-      R2R_INTERNAL_URL: http://r2g:7373
-    extra_hosts:
-      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
-    depends_on:
-      backend:
-        condition: service_healthy
-    volumes:
-      - dr_uploads:/var/lib/dr-uploads:rw
-    entrypoint:
-      - bash
-      - -c
-      - exec python -m arq app.workers.lo_worker.WorkerSettings
-    restart: unless-stopped
+  # The Python R2R `backend` service and its `worker-lo` arq sibling were
+  # removed from this compose on 2026-05-17. The platform/backend
+  # subdirectory disappeared from the platform sub-repo as part of the Go
+  # cutover (memory: ldr_deploy_state notes the R2R backend has been
+  # vestigial since the Adamaton rename on 2026-05-16). The compose kept
+  # referencing the dead image until `bin/adam deploy pi5` started failing
+  # on its missing manifest; removing both services unblocks deploys.
+  #
+  # Downstream `SKILLS_R2R_BASE_URL` / `PLATFORM_BASE_URL` /
+  # `DEEPRESEARCH_URL` env vars still point at `http://backend:7272` —
+  # left intentionally as DEAD pointers because the consuming services
+  # already tolerate the target being absent (they've run without it
+  # since the rename). Removing them is a separate cleanup PR.
 
   plugin-host:
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-plugin-host:${ADAMATON_PLUGIN_HOST_TAG:-main}
@@ -558,7 +506,6 @@ services:
       - "80:80"
       - "443:443"
     depends_on:
-      - backend
       - evo-api
       - ldr
       - nano-research
