@@ -191,37 +191,45 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  skills-worker:
+  # Unified Temporal worker. One container, one image, N processes —
+  # s6-overlay supervises one adamaton-worker --queue=<q> per entry in
+  # WORKER_QUEUES. Pi5 hosts every queue today, so it pulls the 'full'
+  # variant (compiled with skills + reindex + dispatch + evo). A leaner
+  # 'light' variant exists for nodes that don't need evo.
+  #
+  # Replaces the four previous worker service blocks:
+  #   skills-worker, reindex-worker, dispatch-worker, evo-worker.
+  # The image-tags.env entry ADAMATON_WORKER_TAG pins variant+sha
+  # together (e.g. "full-sha-abc123"); the four legacy ADAMATON_*_TAG
+  # vars are kept in image-tags.env for one release cycle so
+  # `bin/adam deploy --rollback` can still spawn the standalone
+  # workers from a previous umbrella state.
+  adamaton-worker:
     hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-worker:${ADAMATON_SKILLS_WORKER_TAG:-main}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker-full:${ADAMATON_WORKER_TAG:-main}
     env_file: [.env, image-tags.env]
     environment:
+      WORKER_QUEUES: skills,reindex-ingest,reindex-extract,dispatch,evo
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
+      # Skills + dispatch + evo land on the evo Postgres (5432).
       EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # Reindex points at deepresearch (5433/deepresearch on pi5; the
+      # container reaches it via the compose-internal postgres name on
+      # port 5432 because pi5 runs both DBs in one postgres instance —
+      # the reindex worker's DSN expects 5433 only on hosts where the
+      # deepresearch DB lives elsewhere).
+      REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       SKILLS_R2R_BASE_URL: http://backend:7272
       SKILLS_R2R_ENABLED: "true"
-      LOG_LEVEL: info
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
-
-  reindex-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-reindex-worker:${ADAMATON_REINDEX_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       PLATFORM_BASE_URL: http://backend:7272
-      LOG_LEVEL: info
       R2G_URL: http://r2g:7373
+      DEEPRESEARCH_URL: http://backend:7272
+      # Pi only registers KernelEvaluatorActivities; the workflow
+      # dispatches kernel evals to blackwell's "evo-kernel" queue.
+      EVO_KERNEL_REMOTE_HOST: ""
+      LOG_LEVEL: info
     depends_on:
       postgres:
         condition: service_healthy
@@ -392,21 +400,8 @@ services:
       - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
-  dispatch-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-dispatch-worker:${ADAMATON_DISPATCH_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
-      LOG_LEVEL: info
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    restart: unless-stopped
+  # dispatch-worker rolled into adamaton-worker above (queue=dispatch).
+  # Block removed; the queue is hosted by the unified worker container.
 
   evo-api:
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-api:${ADAMATON_EVO_API_TAG:-main}
@@ -454,29 +449,10 @@ services:
       - "9123"
     restart: unless-stopped
 
-  # ---- evolve sub-repo ----------------------------------------------------
-  evo-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
-      EVO_TASK_QUEUE: evo
-      DEEPRESEARCH_URL: http://backend:7272
-      LOG_LEVEL: info
-      # KernelBench evals dispatch to blackwell via ssh per
-      # `evolve: dual-target kernel eval via RemoteHost ssh` (86e6208).
-      # Leave empty on the Pi so the worker only handles the cheap activities;
-      # the blackwell stack runs another evo-worker with this populated.
-      EVO_KERNEL_REMOTE_HOST: ""
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    restart: unless-stopped
+  # ---- evolve sub-repo (rolled into adamaton-worker above as queue=evo) ----
+  # The standalone evo-worker block moved into the unified adamaton-worker
+  # service. KernelBench evals still dispatch to blackwell's "evo-kernel"
+  # queue (see deploy/blackwell/docker-compose.yml).
 
   # ---- frontend sub-repo + edge proxy -------------------------------------
   frontend:
