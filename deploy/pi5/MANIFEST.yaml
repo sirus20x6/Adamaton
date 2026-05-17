@@ -23,15 +23,20 @@ services:
   - r2g
   - skills-rae
   - skills-rae-worker
-  - skills-worker
-  - reindex-worker
+  - adamaton-worker     # unified — replaces skills/reindex/dispatch/evo-worker
   - nano-research
   - nano-research-worker
   - figure-renderer
   - backend
   - worker-lo
   - plugin-host
-  - dispatch-worker
   - evo-api
-  - evo-worker
   - deploy-agent
+  # Standalone worker services. Kept allow-listed for one release
+  # cycle so `bin/adam deploy --rollback` to a pre-consolidation SHA
+  # can still drive their restarts; remove after the rollback window
+  # closes.
+  - skills-worker
+  - reindex-worker
+  - dispatch-worker
+  - evo-worker
