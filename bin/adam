@@ -702,7 +702,9 @@ ship_service_spec() {
         # replace directives that reach across to ../../core, ../../knowledge,
         # etc. Multi-stage build needs every sub-repo in the build context.
         dashboard)             echo "platform|platform/dashboard/Dockerfile|.|adamaton-dashboard" ;;
-        plugin-host)           echo "platform|platform/plugin-host/Dockerfile|platform/plugin-host|adamaton-plugin-host" ;;
+        # plugin-host now uses umbrella context too (replace directives reach
+        # across to ../../core etc.; same fix pattern as dashboard).
+        plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
         dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|platform/dispatch|adamaton-dispatch-worker" ;;
         deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|platform/deploy-agent|adamaton-deploy-agent" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
