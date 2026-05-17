@@ -121,6 +121,23 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         }
     }
 
+    # SPA-bundle fallback: the React bundle was built with empty
+    # VITE_EVO_API_BASE (the `?? "/evo-api"` default only fires on
+    # null/undefined, not on an empty string set at build time), so it
+    # hits bare /api/v1/{delegator,workflows,evo,system}/* directly.
+    # Route those to evo-api with the same bearer injection. Note:
+    # /api/v1/nano/* is claimed earlier by @nano_research; this matcher
+    # only catches what evo-api owns.
+    @evoapi_bare path /api/v1/delegator/* /api/v1/workflows/* /api/v1/evo/* /api/v1/system/* /api/v1/health* /api/v1/dashboard/* /api/v1/llm/* /api/v1/skills/* /api/v1/workers* /api/v1/workers/* /api/v1/racks /api/v1/jobs* /api/v1/jobs/* /api/v1/memory/* /api/v1/research/*
+    handle @evoapi_bare {
+        request_header Authorization "Bearer {env.EVO_API_TOKEN}"
+        reverse_proxy evo-api:9123 {
+            transport http {
+                read_timeout 1800s
+            }
+        }
+    }
+
     # Push-deploy receiver. /deploy/health is unauth; all other endpoints
     # require the bearer in DEPLOY_AGENT_TOKEN (checked by the agent itself).
     @deploy_agent path /deploy/*
