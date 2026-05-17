@@ -79,6 +79,56 @@ services:
       - "8888:8080"
     restart: unless-stopped
 
+  # ---- LDR (Local Deep Research, upstream Python) -------------------------
+  # Temporary service deployed for Phase A bring-up of the Go bridge → LDR
+  # path. The Go bridge speaks HTTP to this service over the compose network
+  # and authenticates via the header-auth middleware (see task A.0) keyed by
+  # LDR_API_KEY. Slated for removal in Phase B.9 once the Go reimplementation
+  # passes the parity gate. See deploy/pi5/LDR_BRINGUP.md.
+  #
+  # Upstream image is multi-arch (linux/arm64 included), so it works on the
+  # pi5 host without a local build. Switch to `build:` if a local fork is
+  # needed for the middleware patch and upstream hasn't accepted it.
+  ldr:
+    image: localdeepresearch/local-deep-research:latest
+    environment:
+      # Docker-required network bindings (per upstream docker-compose).
+      LDR_WEB_HOST: 0.0.0.0
+      LDR_WEB_PORT: "5000"
+      LDR_DATA_DIR: /data
+      # SearXNG meta-search backend — reuse the existing pi5 service.
+      LDR_SEARCH_ENGINE_WEB_SEARXNG_DEFAULT_PARAMS_INSTANCE_URL: http://searxng:8080
+      # Adamaton-specific: shared secret consumed by the header-auth
+      # middleware patched in task A.0. Upstream LDR does not read this
+      # variable; if the middleware is not yet present this is a no-op.
+      LDR_API_KEY: ${LDR_API_KEY}
+      # LLM provider — point at the workstation's OpenAI-compatible endpoint
+      # (vLLM) so LDR uses the same backend as r2g/nano-research instead of
+      # spinning up its own ollama. Override at deploy time if needed.
+      LDR_LLM_PROVIDER: ${LDR_LLM_PROVIDER:-openai_endpoint}
+      LDR_LLM_OPENAI_ENDPOINT_URL: ${LDR_LLM_OPENAI_ENDPOINT_URL:-http://10.0.4.37:9080/v1}
+      LDR_LLM_OPENAI_ENDPOINT_API_KEY: ${LDR_LLM_OPENAI_ENDPOINT_API_KEY:-}
+      LDR_LLM_MODEL: ${LDR_LLM_MODEL:-qwen3.6-27b-nvfp8}
+      # Lock public registration off — the bridge is the only consumer.
+      LDR_APP_ALLOW_REGISTRATIONS: "false"
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      searxng:
+        condition: service_started
+    volumes:
+      - ldr_data:/data
+      - ldr_scripts:/scripts
+    # SQLCipher needs mlock() — match upstream's compose.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # Internal-only; Caddy reverse-proxies ldr.local → ldr:5000.
+    expose:
+      - "5000"
+    restart: unless-stopped
+
   temporal:
     image: temporalio/auto-setup:1.27
     environment:
@@ -491,6 +541,7 @@ services:
     depends_on:
       - backend
       - evo-api
+      - ldr
       - nano-research
       - r2g
       - skills-rae
@@ -540,3 +591,5 @@ volumes:
   caddy_data:
   caddy_config:
   nano_workspace:
+  ldr_data:
+  ldr_scripts:
