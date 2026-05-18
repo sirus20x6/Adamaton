@@ -732,6 +732,12 @@ ship_service_spec() {
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
         dataset-worker)        echo "evolve|evolve/dataset-manager/Dockerfile|.|adamaton-dataset-worker" ;;
+        # v1.0 / v1.1 on-chain observability daemons. Same multi-module
+        # build context as dispatch-worker because they pull from
+        # core/p2p/eth which (in v1.x) may grow replace directives across
+        # the sub-repo boundary. Each daemon reads one core/cmd/* entry-
+        # point and otherwise shares the core go.mod.
+        audit-monitor)         echo "core|core/cmd/audit-monitor/Dockerfile|.|adamaton-audit-monitor" ;;
         # Unified build-tag-configurable worker. Three variants share the
         # same Dockerfile + source tree; each variant pins a multi-stage
         # --target and a GO_TAGS build-arg, plus a final field naming
