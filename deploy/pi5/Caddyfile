@@ -200,6 +200,12 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         uri strip_prefix /network-api/finalizer
         reverse_proxy finalize-bot:9278
     }
+    @stealth_monitor path /network-api/stealth/*
+    handle @stealth_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/stealth
+        reverse_proxy stealthmonitor:9279
+    }
 
     # SPA: static file server with index.html fallback.
     handle {

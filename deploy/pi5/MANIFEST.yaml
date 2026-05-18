@@ -35,6 +35,7 @@ services:
   - federation-monitor  # v1.0/v1.1 on-chain Federation-contract event indexer; serves /network-api/federation/*
   - ledger-monitor      # v1.0/v1.1 on-chain Ledger-contract event indexer; serves /network-api/ledger/*
   - finalize-bot        # v1.1 permissionless finalize daemon; signs finalize(jobID) txns after dispute window
+  - stealthmonitor      # Phase 8.2 ERC-5564 Announce indexer; serves /network-api/stealth/*
   # Standalone worker services. Kept allow-listed for one release
   # cycle so `bin/adam deploy --rollback` to a pre-consolidation SHA
   # can still drive their restarts; remove after the rollback window

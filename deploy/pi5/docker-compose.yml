@@ -553,6 +553,29 @@ services:
       retries: 3
       start_period: 15s
 
+  # stealthmonitor indexes the Phase 8.2 StealthAnnouncer contract on
+  # Sepolia (chain 11155111). Stateless contract; we just observe
+  # Announce events and serve them at /network-api/stealth/* via Caddy.
+  # Workers pipe /announcements → adamaton-wallet stealth scan with
+  # their viewing key to detect incoming stealth payments.
+  stealthmonitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-stealthmonitor:${ADAMATON_STEALTHMONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --announcer-address=0x21948CE4758f7641f56a8C57f57fe0532011a1A2
+      - --http-addr=0.0.0.0:9279
+      - --from-block=10875193
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9279/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # finalize-bot is the v1.1 permissionless finalize daemon — subscribes
   # to Audit.OutcomePosted, waits for the dispute window, then signs
   # finalize(jobID) transactions. The only signer-bearing daemon in
