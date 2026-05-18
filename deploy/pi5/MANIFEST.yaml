@@ -35,3 +35,4 @@ services:
   - evo-api
   - evo-worker
   - deploy-agent
+  - dataset-worker      # evolve/dataset-manager — local + HF importers, S3/MinIO blob storage
