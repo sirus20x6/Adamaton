@@ -94,6 +94,23 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         }
     }
 
+    # /platform/experiments — owned by evo-api (apiserver). Replaces the
+    # dead path through the retired adamaton-platform-backend (FastAPI /
+    # backend:7272). Reads of the table still go through PostgREST at
+    # /db/experiments; this block only handles writes + search + metrics
+    # + launch. Bearer injection matches @evoapi below so the React
+    # bundle never sees the token.
+    @platform_experiments path /platform/experiments /platform/experiments/*
+    handle @platform_experiments {
+        header Cache-Control "no-store"
+        request_header Authorization "Bearer {env.EVO_API_TOKEN}"
+        reverse_proxy evo-api:9123 {
+            transport http {
+                read_timeout 60s
+            }
+        }
+    }
+
     # /platform/health/* compat shim — the SPA's existing
     # useSystemHealth() hook polls /platform/health/ready, which used
     # to land on the Python R2R backend. evo-api now serves a
