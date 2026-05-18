@@ -27,8 +27,6 @@ services:
   - nano-research
   - nano-research-worker
   - figure-renderer
-  - backend
-  - worker-lo
   - plugin-host
   - evo-api
   - deploy-agent
