@@ -160,8 +160,10 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
     # section calls /network-api/<daemon>/<path>; we strip the prefix
     # so the daemon sees its own native path.
     #
-    # Daemons currently wired: audit-monitor. Federation / ledger /
-    # finalize-bot will join as their compose services land.
+    # Daemons currently wired: audit-monitor, federation-monitor,
+    # ledger-monitor, finalize-bot. All four serve via the
+    # /network-api/<daemon>/* path scheme so the frontend Network
+    # section can address them with a single proxy convention.
     @audit_monitor path /network-api/audit/*
     handle @audit_monitor {
         header Cache-Control "no-store"
@@ -179,6 +181,12 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         header Cache-Control "no-store"
         uri strip_prefix /network-api/ledger
         reverse_proxy ledger-monitor:9277
+    }
+    @finalizer_monitor path /network-api/finalizer/*
+    handle @finalizer_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/finalizer
+        reverse_proxy finalize-bot:9278
     }
 
     # SPA: static file server with index.html fallback.
