@@ -32,9 +32,12 @@ roles:
 
   bge-embed:
     kind: http
-    probe: { port: 8089, path: /healthz, timeout: 2s }
+    # llama-server native bge-embed lives on the workstation, not on
+    # pi5. BGE_EMBED_URL env var = http://10.0.4.37:8092 in deploy.
+    probe: { host: 10.0.4.37, port: 8092, path: /health, timeout: 2s }
     min_healthy: 1
-    description: "BGE-M3 1024-dim embedding sidecar"
+    optional: true
+    description: "BGE-M3 1024-dim embedding (workstation llama-server)"
 
   plugin-host:
     kind: http
@@ -44,19 +47,25 @@ roles:
 
   skills-rae:
     kind: http
-    probe: { port: 7376, path: /health, timeout: 2s }
+    # The shared knowledge/skills-rae routes package registers /healthz
+    # (Kubernetes-idiomatic), not /health.
+    probe: { port: 7376, path: /healthz, timeout: 2s }
     min_healthy: 1
     description: "SkillRAE retrieval + context compilation"
 
   nano-research:
     kind: http
-    probe: { port: 7378, path: /health, timeout: 2s }
+    # Same routes package as skills-rae — registers /healthz.
+    probe: { port: 7378, path: /healthz, timeout: 2s }
     min_healthy: 1
     description: "Autonomous research pipeline"
 
   evo-api:
     kind: http
-    probe: { port: 9123, path: /api/v1/health, timeout: 2s }
+    # /metrics is the only top-level un-authenticated endpoint
+    # exposed by the apiserver (/api/v1/health is bearer-gated). It
+    # always returns 200 once the process is up and listening.
+    probe: { port: 9123, path: /metrics, timeout: 2s }
     min_healthy: 1
     description: "Dashboard / aggregator API"
 
