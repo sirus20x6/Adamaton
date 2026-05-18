@@ -738,6 +738,8 @@ ship_service_spec() {
         # the sub-repo boundary. Each daemon reads one core/cmd/* entry-
         # point and otherwise shares the core go.mod.
         audit-monitor)         echo "core|core/cmd/audit-monitor/Dockerfile|.|adamaton-audit-monitor" ;;
+        federation-monitor)    echo "core|core/cmd/federation-monitor/Dockerfile|.|adamaton-federation-monitor" ;;
+        ledger-monitor)        echo "core|core/cmd/ledger-monitor/Dockerfile|.|adamaton-ledger-monitor" ;;
         # Unified build-tag-configurable worker. Three variants share the
         # same Dockerfile + source tree; each variant pins a multi-stage
         # --target and a GO_TAGS build-arg, plus a final field naming
