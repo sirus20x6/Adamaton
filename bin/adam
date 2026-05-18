@@ -740,6 +740,7 @@ ship_service_spec() {
         audit-monitor)         echo "core|core/cmd/audit-monitor/Dockerfile|.|adamaton-audit-monitor" ;;
         federation-monitor)    echo "core|core/cmd/federation-monitor/Dockerfile|.|adamaton-federation-monitor" ;;
         ledger-monitor)        echo "core|core/cmd/ledger-monitor/Dockerfile|.|adamaton-ledger-monitor" ;;
+        finalize-bot)          echo "core|core/cmd/finalize-bot/Dockerfile|.|adamaton-finalize-bot" ;;
         # Unified build-tag-configurable worker. Three variants share the
         # same Dockerfile + source tree; each variant pins a multi-stage
         # --target and a GO_TAGS build-arg, plus a final field naming

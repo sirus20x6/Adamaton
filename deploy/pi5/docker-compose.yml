@@ -597,6 +597,46 @@ services:
       retries: 3
       start_period: 15s
 
+  # finalize-bot is the v1.1 permissionless finalize daemon — subscribes
+  # to Audit.OutcomePosted, waits for the dispute window, then signs
+  # finalize(jobID) transactions. The only signer-bearing daemon in
+  # this compose file.
+  #
+  # Key handling: the operator places a 0x-prefixed raw hex private
+  # key at ./secrets/finalize-bot.key on the host (600 perms, never
+  # committed). The compose stanza bind-mounts it into the container
+  # read-only at /run/secrets/finalize-bot.key; --key-file points the
+  # daemon at that path. Key never appears in env, image, or git.
+  #
+  # Idempotency: the daemon discovers pending outcomes from its
+  # FilterLogs backfill at --from-block; restarting it doesn't
+  # re-submit already-finalized outcomes (the contract reverts on
+  # double finalize, which the daemon already gracefully handles).
+  finalize-bot:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-finalize-bot:${ADAMATON_FINALIZE_BOT_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --audit-address=0xf3922cf86227301ac9a6b856fe6b577a09f96670
+      - --ledger-address=0x6dced8becbc68b2454ba03756078f0242578737d
+      - --federation-address=0xe9b840d0454161742eb65b295af4d0aa3723026e
+      - --registry-address=0xfa24dba9dbfe703133388e81af92b694b71e2d16
+      - --http-addr=0.0.0.0:9278
+      - --from-block=10825000
+      - --tick-interval=60s
+      - --health-poll-interval=30s
+      - --key-file=/run/secrets/finalize-bot.key
+    volumes:
+      - ./secrets/finalize-bot.key:/run/secrets/finalize-bot.key:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9278/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ---- frontend sub-repo + edge proxy -------------------------------------
   frontend:
     # Caddy reverse-proxies every API and serves the SPA. The frontend SPA
