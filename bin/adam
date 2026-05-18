@@ -930,9 +930,30 @@ cmd_sync_compose() {
         echo "==> sync-compose: $env_src -> $ssh:Adamaton-deploy/.env.example"
         scp "$env_src" "$ssh:Adamaton-deploy/.env.example" || echo "    warning: env.example scp failed (non-fatal)" >&2
     fi
+    # Caddyfile — Caddy is bind-mount-served; without this an edit to
+    # the umbrella's Caddyfile never reaches the host. After a Caddyfile
+    # change the operator should `docker compose restart frontend` to
+    # avoid the pi-Caddy bind-mount inode trap (memory:
+    # pi_caddy_bind_mount_inode).
+    local caddy_src="$ADAM_ROOT/deploy/$host/Caddyfile"
+    if [[ -f "$caddy_src" ]]; then
+        echo "==> sync-compose: $caddy_src -> $ssh:Adamaton-deploy/Caddyfile"
+        scp "$caddy_src" "$ssh:Adamaton-deploy/Caddyfile" || echo "    warning: Caddyfile scp failed (non-fatal)" >&2
+    fi
+    # Fleet-health topology — bind-mounted into evo-api at
+    # /etc/adamaton/health-topology.yml. Single source-of-truth under
+    # deploy/health/ (it's fleet-wide, not per-host); copied to the
+    # per-host deploy dir on push.
+    local topo_src="$ADAM_ROOT/deploy/health/topology.yml"
+    if [[ -f "$topo_src" ]]; then
+        echo "==> sync-compose: $topo_src -> $ssh:Adamaton-deploy/health-topology.yml"
+        scp "$topo_src" "$ssh:Adamaton-deploy/health-topology.yml" || echo "    warning: topology scp failed (non-fatal)" >&2
+    fi
     echo
     echo "Compose synced. To apply env changes for a service:"
     echo "  ssh $ssh 'cd Adamaton-deploy && docker compose up -d --force-recreate --no-deps <service>'"
+    echo "If the Caddyfile changed:"
+    echo "  ssh $ssh 'cd Adamaton-deploy && docker compose restart frontend'"
 }
 
 cmd_bootstrap() {

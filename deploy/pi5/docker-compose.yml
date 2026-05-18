@@ -382,8 +382,16 @@ services:
       # via the compose service name.
       ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://10.0.4.20:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
       DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN}
+      # Fleet-health topology — apiserver loads at boot. Env override
+      # so operators can repoint without rebuilding the image.
+      HEALTH_TOPOLOGY_PATH: /etc/adamaton/health-topology.yml
+      # HEALTH_LOCAL_HOST tells the aggregator which host it's running
+      # on, used to decide which instances to actively probe vs which
+      # to trust the peer deploy-agent's docker compose ps view of.
+      HEALTH_LOCAL_HOST: pi5
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
+      - ./health-topology.yml:/etc/adamaton/health-topology.yml:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/projects:/root/.claude/projects:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/codex/memories:/root/.codex/memories:ro

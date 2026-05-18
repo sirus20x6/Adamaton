@@ -1,0 +1,144 @@
+# Adamaton fleet health topology — authoritative graph of roles +
+# capabilities probed by /api/v1/health/* on the evo-api.
+#
+# Loaded by platform/dashboard/apiserver at boot. Path resolution order
+# (first match wins):
+#   $HEALTH_TOPOLOGY_PATH
+#   /etc/adamaton/health-topology.yml          (container mount)
+#   deploy/health/topology.yml                  (repo-relative for dev)
+#
+# Editing this file is the right way to add a new probed service or
+# adjust quorum thresholds — no Go rebuild needed; just restart evo-api
+# (or POST /api/v1/health/cache to bust the cache without a restart,
+# once that lands as a button on the UI).
+#
+# Role kinds:
+#   http            GET probe.path on probe.port; 2xx ok, 4xx degraded, 5xx offline
+#   tcp             net.Dial probe.port; connect ok, anything else offline
+#   redis           tcp + RESP PING/PONG roundtrip
+#   postgres        pgxpool.Ping on the shared evoPool (no probe needed)
+#   temporal_queue  count of evo.workers rows declaring `queue` with a fresh heartbeat
+#
+# probe.host is optional; defaults to the role name itself (which is
+# what docker-compose's internal DNS resolves to inside the network).
+
+roles:
+  # ---- HTTP services (probed in-cluster via docker DNS) ----
+  r2g:
+    kind: http
+    probe: { port: 7373, path: /health, timeout: 2s }
+    min_healthy: 1
+    description: "Go RAG API (/v3, /platform/figures, /platform/sources, /platform/graph)"
+
+  bge-embed:
+    kind: http
+    probe: { port: 8089, path: /healthz, timeout: 2s }
+    min_healthy: 1
+    description: "BGE-M3 1024-dim embedding sidecar"
+
+  plugin-host:
+    kind: http
+    probe: { port: 7375, path: /health, timeout: 2s }
+    min_healthy: 1
+    description: "Plugin supervisor (gRPC over unix socket)"
+
+  skills-rae:
+    kind: http
+    probe: { port: 7376, path: /health, timeout: 2s }
+    min_healthy: 1
+    description: "SkillRAE retrieval + context compilation"
+
+  nano-research:
+    kind: http
+    probe: { port: 7378, path: /health, timeout: 2s }
+    min_healthy: 1
+    description: "Autonomous research pipeline"
+
+  evo-api:
+    kind: http
+    probe: { port: 9123, path: /api/v1/health, timeout: 2s }
+    min_healthy: 1
+    description: "Dashboard / aggregator API"
+
+  # ---- Stateful prerequisites ----
+  postgres:
+    kind: postgres
+    min_healthy: 1
+    description: "pgvector + R2R schemas + evo.workers"
+
+  redis:
+    kind: tcp
+    probe: { port: 6379, timeout: 2s }
+    min_healthy: 1
+    description: "arq queue + cache"
+
+  temporal:
+    kind: tcp
+    probe: { port: 7233, timeout: 2s }
+    min_healthy: 1
+    description: "Workflow orchestrator"
+
+  # ---- External LLM (workstation) ----
+  vllm:
+    kind: http
+    probe: { host: 10.0.4.37, port: 9080, path: /v1/models, timeout: 2s }
+    min_healthy: 0
+    optional: true
+    description: "Workstation vLLM endpoint — optional; capabilities don't drag when down"
+
+  # ---- Temporal workers — heartbeat-based liveness ----
+  reindex-worker:
+    kind: temporal_queue
+    queue: reindex-ingest
+    min_healthy: 1
+    heartbeat_max_age: 90s
+    description: "Reindex ingest workflows (3× the 30s heartbeat period before stale)"
+
+  skills-worker:
+    kind: temporal_queue
+    queue: skills
+    min_healthy: 1
+    heartbeat_max_age: 90s
+    description: "Skills lifecycle workflows"
+
+  dispatch-worker:
+    kind: temporal_queue
+    queue: dispatch
+    min_healthy: 1
+    heartbeat_max_age: 90s
+    description: "Cross-service dispatch + delegation routing"
+
+  evo-worker:
+    kind: temporal_queue
+    queue: evo
+    min_healthy: 0
+    heartbeat_max_age: 90s
+    description: "Evolve loop workers (GPU-bound; cold by default on Pi)"
+
+# Named user-facing rollups. Each capability's status = worst of its
+# (non-optional, online-required) member roles.
+capabilities:
+  data-plane:
+    label: "Data plane"
+    roles: [postgres, redis, temporal]
+    description: "Stateful prerequisites for every other capability"
+
+  rag:
+    label: "RAG plane"
+    roles: [r2g, bge-embed, skills-rae, plugin-host]
+    description: "Retrieval, embedding, reranking, plugin-served corpora"
+
+  research:
+    label: "Research"
+    roles: [nano-research, r2g, plugin-host]
+    description: "Autonomous research pipelines + figure rendering"
+
+  ops:
+    label: "Operations"
+    roles: [evo-api, dispatch-worker, skills-worker, reindex-worker]
+    description: "Dashboard + scheduling + ingest workers"
+
+  llm:
+    label: "LLM inference"
+    roles: [vllm]
+    description: "External LLM endpoint (workstation vLLM)"
