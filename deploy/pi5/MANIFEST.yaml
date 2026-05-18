@@ -33,6 +33,7 @@ services:
   - evo-api
   - deploy-agent
   - dataset-worker      # evolve/dataset-manager — local + HF importers, S3/MinIO blob storage
+  - audit-monitor       # v1.0/v1.1 on-chain Audit-contract event indexer; serves /network-api/audit/* via Caddy
   # Standalone worker services. Kept allow-listed for one release
   # cycle so `bin/adam deploy --rollback` to a pre-consolidation SHA
   # can still drive their restarts; remove after the rollback window

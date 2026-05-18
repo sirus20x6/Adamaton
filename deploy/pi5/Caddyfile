@@ -154,6 +154,21 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         reverse_proxy deploy-agent:9128
     }
 
+    # v1.0 / v1.1 on-chain observability daemons. Each daemon's HTTP
+    # surface is bound to 0.0.0.0 inside its own container; Caddy is
+    # what enforces the public-loopback boundary. The frontend Network
+    # section calls /network-api/<daemon>/<path>; we strip the prefix
+    # so the daemon sees its own native path.
+    #
+    # Daemons currently wired: audit-monitor. Federation / ledger /
+    # finalize-bot will join as their compose services land.
+    @audit_monitor path /network-api/audit/*
+    handle @audit_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/audit
+        reverse_proxy audit-monitor:9275
+    }
+
     # SPA: static file server with index.html fallback.
     handle {
         root * /srv/frontend

@@ -512,6 +512,50 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ---- v1.0 / v1.1 on-chain observability daemons -------------------------
+  # audit-monitor indexes the Adamaton v1.0 Audit contract on Sepolia
+  # mainnet-shadow (chain 11155111). Live WS subscription to OutcomePosted,
+  # OutcomeChallenged, OutcomeFinalizedChallenged. Exposes /health,
+  # /outcomes, /metrics on :9275. The frontend Network section talks to
+  # this through Caddy's /network-api/audit/* proxy block.
+  #
+  # Sepolia RPC notes:
+  #   - publicnode WS exits handle eth_subscribe; HTTP-only RPCs return
+  #     "notifications not supported" from the abigen Watch* helpers.
+  #   - --from-block is set to roughly the deploy window so the daemon's
+  #     in-memory snapshot rebuilds on every restart. Bump the value
+  #     when the contract is re-deployed.
+  audit-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-audit-monitor:${ADAMATON_AUDIT_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      # publicnode's public RPC enforces a strict 50k-block-range cap on
+      # eth_getLogs / eth_newFilter; abigen's Watch* helpers do a
+      # bounded initial filter at subscribe time that often blows
+      # through it. Tenderly's public gateway is less strict and
+      # speaks WS; swap back to a paid endpoint if rate limits bite.
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --audit-address=0xf3922cf86227301ac9a6b856fe6b577a09f96670
+      - --http-addr=0.0.0.0:9275
+      # publicnode's public eth_getLogs has a 50k-block-range limit;
+      # set --from-block close to the current Sepolia head so backfill
+      # stays inside one window. We never expect outcomes posted to a
+      # contract before its own deploy block anyway. v1.2 follow-up:
+      # chunked backfill inside audit-monitor itself so this number
+      # can move freely without operator tuning.
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    # No port mapping to the host — Caddy reaches it as
+    # http://audit-monitor:9275 over the compose default network.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9275/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ---- frontend sub-repo + edge proxy -------------------------------------
   frontend:
     # Caddy reverse-proxies every API and serves the SPA. The frontend SPA
