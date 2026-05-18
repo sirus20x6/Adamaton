@@ -168,6 +168,18 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         uri strip_prefix /network-api/audit
         reverse_proxy audit-monitor:9275
     }
+    @federation_monitor path /network-api/federation/*
+    handle @federation_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/federation
+        reverse_proxy federation-monitor:9276
+    }
+    @ledger_monitor path /network-api/ledger/*
+    handle @ledger_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/ledger
+        reverse_proxy ledger-monitor:9277
+    }
 
     # SPA: static file server with index.html fallback.
     handle {

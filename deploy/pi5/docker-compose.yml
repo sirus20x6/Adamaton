@@ -556,6 +556,47 @@ services:
       retries: 3
       start_period: 15s
 
+  # federation-monitor indexes the Adamaton v1.0 Federation contract on
+  # Sepolia (chain 11155111). Serves /network-api/federation/* via Caddy.
+  # Same WS RPC + tight --from-block window as audit-monitor.
+  federation-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-federation-monitor:${ADAMATON_FEDERATION_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --federation-address=0xe9b840d0454161742eb65b295af4d0aa3723026e
+      - --http-addr=0.0.0.0:9276
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9276/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ledger-monitor indexes the Adamaton v1.0 Ledger contract on Sepolia.
+  # Serves /network-api/ledger/* via Caddy.
+  ledger-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-ledger-monitor:${ADAMATON_LEDGER_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --ledger-address=0x6dced8becbc68b2454ba03756078f0242578737d
+      - --http-addr=0.0.0.0:9277
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9277/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ---- frontend sub-repo + edge proxy -------------------------------------
   frontend:
     # Caddy reverse-proxies every API and serves the SPA. The frontend SPA
