@@ -83,6 +83,15 @@ services:
       - cls
       - -c
       - "8192"
+      # Physical batch must fit the largest single input. llama.cpp embeddings
+      # require the whole input in one ubatch; the default --ubatch-size is 512,
+      # so any chunk over ~512 tokens fails with HTTP 500 "input too large to
+      # process; increase the physical batch size". r2g chunks at ~1024 tokens
+      # and bge-m3's max is 8192, so match -c 8192. (-b must be >= -ub.)
+      - -b
+      - "8192"
+      - -ub
+      - "8192"
       - --port
       - "8092"
       - --host

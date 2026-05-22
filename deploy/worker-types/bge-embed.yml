@@ -18,6 +18,11 @@ service:
   # vectors that callers won't recognise. -c 8192 mirrors bge-m3's max
   # context. -ngl 99 puts every layer on GPU when CUDA is available;
   # arm64/CPU variants will override this to 0 via .env.
+  #
+  # -b/-ub 8192: physical batch must fit the largest single input. llama.cpp
+  # embeddings require the whole input in one ubatch; the default --ubatch-size
+  # is 512, so chunks over ~512 tokens fail with HTTP 500 "input too large to
+  # process". r2g chunks at ~1024 tokens; match -c 8192. (-b must be >= -ub.)
   command:
     - --model
     - /models/bge-m3-f16.gguf
@@ -25,6 +30,10 @@ service:
     - --pooling
     - cls
     - -c
+    - "8192"
+    - -b
+    - "8192"
+    - -ub
     - "8192"
     - --port
     - "8092"
