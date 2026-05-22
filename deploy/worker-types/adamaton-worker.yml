@@ -34,6 +34,13 @@ service:
     EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
     REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5433/deepresearch?sslmode=disable
     POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    # Embedding sidecar for the reindex-ingest ChunkEmbedPersist activity.
+    # Prefer native llama-server bge-embed (8092); BGE_SIDECAR_URL is the
+    # legacy fallback. Only used by hosts whose WORKER_QUEUES include
+    # reindex-ingest; harmless elsewhere.
+    BGE_EMBED_URL: ${BGE_EMBED_URL:-http://${WORKER_EMBED_HOST:-10.0.4.37}:8092}
+    BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://${WORKER_EMBED_HOST:-10.0.4.37}:8089}
+    REINDEX_EMBED_MODEL: ${REINDEX_EMBED_MODEL:-bge-m3}
     SKILLS_R2R_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272
     SKILLS_R2R_ENABLED: "true"
     PLATFORM_BASE_URL: http://${WORKER_BACKEND_HOST:-backend}:7272

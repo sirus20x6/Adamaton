@@ -219,6 +219,14 @@ services:
       # the reindex worker's DSN expects 5433 only on hosts where the
       # deepresearch DB lives elsewhere).
       REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # Embedding sidecar for the reindex-ingest ChunkEmbedPersist activity
+      # (embedding now runs on the worker node, not inside r2g). Prefer the
+      # native llama-server bge-embed (8092); BGE_SIDECAR_URL is the legacy
+      # Python-sidecar fallback during migration. Must match the model/dim
+      # r2g + skills-rae use or pgvector cosine breaks.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      REINDEX_EMBED_MODEL: bge-m3
       SKILLS_R2R_BASE_URL: http://backend:7272
       SKILLS_R2R_ENABLED: "true"
       PLATFORM_BASE_URL: http://backend:7272
