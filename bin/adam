@@ -718,11 +718,14 @@ ship_service_spec() {
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
         backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
-        # r2g build context is the knowledge sub-repo root (NOT knowledge/r2g)
-        # because the Dockerfile does `COPY r2g/go.mod r2g/go.sum ./` —
-        # the file paths assume r2g/ is a subdir of the context. Building
-        # with context=knowledge/r2g fails with "/r2g/go.sum not found".
-        r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|knowledge|adamaton-r2g" ;;
+        # r2g build context is the UMBRELLA root: since the ztok cgo flip
+        # the Dockerfile COPYs both `ztok` and `knowledge/r2g/` as
+        # umbrella-relative paths (it cross-builds libztok.a from the ztok
+        # source in a Zig stage). ztok is not a submodule — it must be
+        # present at the umbrella root for the build context (see
+        # adamaton_ztok_local_build_recipe). Context=knowledge fails with
+        # "/knowledge/r2g not found".
+        r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|.|adamaton-r2g" ;;
         skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae" ;;
         skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae-worker" ;;
         skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|.|adamaton-skills-worker" ;;
