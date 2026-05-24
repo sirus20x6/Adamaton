@@ -147,14 +147,36 @@ built and their tags pinned in `image-tags.env`.
 1. ~~Copy zotero PDFs into Garage~~ — **no-op on pi5**: no PDFs in the volume.
    General document *uploads* already route to `uploads/<uuid>` via the new
    r2g code; nothing to backfill.
-2. Add `BLOBSTORE_ENDPOINT=http://garage:3900`, `BLOBSTORE_REGION=us-east-1`,
-   `BLOBSTORE_ACCESS_KEY`, `BLOBSTORE_SECRET_KEY` to the `r2g` and
-   `plugin-host` service env; give plugin-host a container-local ephemeral
-   staging dir (`PH_STAGE_DIR`) in place of the NFS mount. (Additive and safe;
-   the new images fail-soft to 503 if these are absent.)
-3. **BLOCKED (see STOP box):** removing the `dr_uploads:` volume + the two
-   `- dr_uploads:/var/lib/dr-uploads` mounts is unsafe until the `cag/` /
-   `plugins/` / `wiki-seed/` / `zotero-sqlite/` data is accounted for.
+2. ✅ **DONE 2026-05-24.** Added `BLOBSTORE_ENDPOINT=http://garage:3900`,
+   `BLOBSTORE_REGION=us-east-1`, `BLOBSTORE_ACCESS_KEY`, `BLOBSTORE_SECRET_KEY`
+   to the `r2g` and `plugin-host` service env; gave plugin-host a
+   container-local ephemeral staging dir (`PH_STAGE_DIR=/run/ph-stage`) in
+   place of the NFS mount, and dropped the `- dr_uploads:/var/lib/dr-uploads`
+   mount from both services. Both services now `depends_on: garage:
+   service_healthy`. (Additive and safe; the new images fail-soft to 503 if
+   the BLOBSTORE_* vars are absent.)
+
+   Required build-infra fixes that landed alongside (workspace-mode Dockerfiles
+   so the new `core/blobstore` + `ztok-go` deps resolve in the build context):
+   - knowledge `r2g/Dockerfile` → workspace mode (PR #16, pin `e5cd4d8`)
+   - platform `plugin-host/Dockerfile` → `COPY ztok` (PR #35, pin `9f535a0`)
+   - umbrella `bin/adam` r2g ship-spec context `knowledge` → `.`
+
+   Shipped to pi5 (images `adamaton-r2g:sha-e5cd4d8`,
+   `adamaton-plugin-host:sha-9f535a0`; the deploy-agent pull quirk required an
+   explicit `docker compose pull + up -d --force-recreate` to converge — see
+   memory `adamaton_deploy_agent_pull_quirk`). **Verified end-to-end:** both
+   logged `blob store ready (dr-uploads)` against `http://garage:3900`; a
+   `POST /platform/sources/upload` round-tripped a 46 B file to
+   `uploads/<uuid>.txt` in the Garage `dr-uploads` bucket (confirmed via
+   `mc stat`, byte size matched), then cleaned up.
+3. **STILL BLOCKED (see STOP box):** the upload/staging *path* is cut over, but
+   removing the `dr_uploads:` volume is unsafe until the persistent `cag/` /
+   `plugins/` / `wiki-seed/` / `zotero-sqlite/` data is moved into Garage (the
+   chosen disposition) and its readers repointed. The volume is still declared
+   and untouched as a rollback net; nothing mounts it anymore. This data move
+   is the next work item — it requires auditing what code reads those prefixes
+   (CAG cache in deepresearch, plugin outputs in plugin-host) before relocating.
 4. The `/mnt/pi-deepresearch` / `/mnt/pi-uploads` fstab cleanup is a **no-op on
    pi5** (no such mounts here). Retiring the Python `worker-hi` service is
    tracked separately (Phase 4) and is independent of this volume question.
