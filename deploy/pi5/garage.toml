@@ -1,0 +1,57 @@
+# deploy/pi5/garage.toml — Garage S3 object store for the Adamaton pi5 stack.
+#
+# Replaces the previous MinIO service. Garage is the single storage node we
+# interact with over S3; it holds BOTH dataset artifacts (bucket `datasets`,
+# consumed by dataset-worker) and document blobs (bucket `dr-uploads`,
+# consumed by r2g + plugin-host via core/blobstore). This kills the fragile
+# NFS mounts (/mnt/pi-deepresearch, /mnt/pi-uploads) — everything that used
+# to be a shared filesystem path is now an S3 key.
+#
+# Single-node, single-tenant, LAN-only. replication_factor = 1 because there
+# is exactly one node; do NOT raise it without adding more Garage nodes to
+# the layout first or writes will block waiting for quorum.
+#
+# Secrets are NOT in this file. They come from the environment so the repo
+# stays clean:
+#   GARAGE_RPC_SECRET     32-byte hex (openssl rand -hex 32)
+#   GARAGE_ADMIN_TOKEN    bearer for the :3903 admin API
+#   GARAGE_METRICS_TOKEN  bearer for /metrics on the admin API
+# These are set in deploy/pi5/.env (see GARAGE_MIGRATION.md).
+#
+# Ports (bound inside the container; only :3900 is wired to consumers over
+# the docker network — nothing is published to the host):
+#   3900  S3 API        (consumers use http://garage:3900)
+#   3901  RPC           (intra-cluster; loopback-only on a single node)
+#   3902  S3 web        (static website serving; unused, left enabled)
+#   3903  admin API     (layout/health; token-gated)
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir     = "/var/lib/garage/data"
+
+# sqlite is the right metadata engine for a single low-write node on a Pi;
+# lmdb is heavier and only pays off at higher object counts.
+db_engine = "sqlite"
+
+replication_factor = 1
+
+rpc_bind_addr   = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region      = "us-east-1"
+api_bind_addr  = "[::]:3900"
+# Path-style addressing is what core/blobstore + dataset-manager use, so a
+# root_domain for vhost-style buckets isn't required. Left set so the S3
+# web endpoint and any future vhost client still resolve.
+root_domain    = ".s3.garage.local"
+
+[s3_web]
+bind_addr   = "[::]:3902"
+root_domain = ".web.garage.local"
+index       = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"
+# admin_token / metrics_token are supplied via GARAGE_ADMIN_TOKEN /
+# GARAGE_METRICS_TOKEN env vars; omitting them here disables the
+# corresponding endpoint unless the env var is present.
