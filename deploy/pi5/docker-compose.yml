@@ -418,28 +418,43 @@ services:
   # service. KernelBench evals still dispatch to blackwell's "evo-kernel"
   # queue (see deploy/blackwell/docker-compose.yml).
 
-  # ---- evolve/dataset-manager: blob storage + Temporal worker ------------
-  # Object storage for dataset artifacts (parquet/jsonl shards). MinIO is
-  # S3-compatible; dataset-worker speaks to it over the docker network via
-  # http://minio:9000. Console is on 9001 (poke at it for debugging).
-  # Root credentials seed the underlying admin user; production deployments
-  # then create a least-privilege access key for the dataset-worker and
-  # store it in credentialstore (see DATASET_S3_ACCESS_NAME below). For
-  # the workstation-first-deploy path the same root creds are reused —
-  # acceptable for a single-tenant LAN-only bucket.
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  # ---- Garage: the storage node ------------------------------------------
+  # S3-compatible object store; the single thing every blob consumer talks
+  # to. Holds dataset artifacts (bucket `datasets`, dataset-worker) AND
+  # document blobs (bucket `dr-uploads`, r2g + plugin-host via
+  # core/blobstore). This replaced MinIO on 2026-05-24 and is what let us
+  # delete the NFS mounts — see deploy/pi5/GARAGE_MIGRATION.md for the
+  # one-time bootstrap (layout assign/apply, bucket create, key gen) and
+  # the MinIO→Garage data copy.
+  #
+  # Unlike MinIO, Garage has no static root credentials: after first boot
+  # you assign a layout and `garage key create` a least-privilege key, then
+  # put its ID/secret into .env as BLOBSTORE_ACCESS_KEY/BLOBSTORE_SECRET_KEY.
+  # rpc/admin secrets come from GARAGE_* env (the config file carries none).
+  garage:
+    image: dxflrs/garage:v1.0.1
+    env_file: [.env]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env (openssl rand -hex 32)}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:-}
     volumes:
-      - minio_data:/data
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    expose:
+      - "3900"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Published so the operator can run the MinIO→Garage data copy and the
+      # bootstrap CLI from the host. Safe to drop to bare `expose` once the
+      # migration is done.
+      - "3900:3900"
+      - "3903:3903"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      # /health is the unauthenticated admin liveness endpoint — 200 once the
+      # node is up and a layout is applied. It reports unhealthy until layout
+      # apply, which is the correct loud signal during bootstrap.
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3903/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -454,16 +469,18 @@ services:
       TEMPORAL_NAMESPACE: default
       EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       DATASET_TASK_QUEUE: dataset-mgr
-      DATASET_S3_ENDPOINT: http://minio:9000
+      # Repointed from http://minio:9000 to Garage. dataset-manager's S3
+      # client is plain path-style S3, so no code change was needed.
+      DATASET_S3_ENDPOINT: http://garage:3900
       DATASET_S3_BUCKET: datasets
       DATASET_S3_REGION: us-east-1
-      # Bootstrap: pass MinIO root creds through to the worker directly.
-      # The first-class lookup path is credentialstore rows under
-      # type=s3AccessKey/s3SecretKey (names DATASET_S3_ACCESS_NAME /
-      # DATASET_S3_SECRET_NAME), but the worker honours env first for
-      # bootstrap convenience.
-      DATASET_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      DATASET_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # The Garage-generated least-privilege key (see GARAGE_MIGRATION.md).
+      # Shared with r2g/plugin-host under the BLOBSTORE_* names; the
+      # DATASET_S3_* aliases default to them so one key configures all
+      # blob consumers. credentialstore lookup (DATASET_S3_ACCESS_NAME /
+      # DATASET_S3_SECRET_NAME) still wins over env when present.
+      DATASET_S3_ACCESS_KEY: ${DATASET_S3_ACCESS_KEY:-${BLOBSTORE_ACCESS_KEY:-}}
+      DATASET_S3_SECRET_KEY: ${DATASET_S3_SECRET_KEY:-${BLOBSTORE_SECRET_KEY:-}}
       # HF token is optional — empty is fine for public datasets.
       HF_TOKEN: ${HF_TOKEN:-}
       LOG_LEVEL: info
@@ -472,7 +489,7 @@ services:
         condition: service_healthy
       temporal:
         condition: service_started
-      minio:
+      garage:
         condition: service_healthy
     restart: unless-stopped
 
@@ -689,7 +706,16 @@ services:
 volumes:
   pg_data:
   redis_data:
-  minio_data:
+  # Garage storage node: metadata (sqlite) + object data, separate volumes
+  # so the data store can be sized/backed independently. minio_data was
+  # removed when MinIO was retired (2026-05-24); its `datasets` contents
+  # were copied into Garage per GARAGE_MIGRATION.md before deletion.
+  garage_meta:
+  garage_data:
+  # dr_uploads is the legacy NFS-backed document-staging volume, still
+  # mounted by r2g + plugin-host until those images move to core/blobstore
+  # (Phase 3). Delete this volume + both mounts in the same change that
+  # ships the blobstore-aware images.
   dr_uploads:
   reranker_hf_cache:
   caddy_data:
