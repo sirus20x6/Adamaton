@@ -130,16 +130,23 @@ services:
       R2G_LLM_MODEL: ${R2G_LLM_MODEL:-qwen3.6-27b-nvfp8}
       R2G_DEFAULT_OWNER_ID: ${R2G_DEFAULT_OWNER_ID:-2acb499e-8428-543b-bd85-0d9098718220}
       R2G_RERANKER_URL: http://reranker:8091
+      # Document blobs now live in the Garage `dr-uploads` bucket (key scheme
+      # uploads/<uuid>), replacing the old dr_uploads volume mount. r2g
+      # fail-softs to 503 on upload/ingest if BLOBSTORE_ENDPOINT is unset.
+      BLOBSTORE_ENDPOINT: ${BLOBSTORE_ENDPOINT:-http://garage:3900}
+      BLOBSTORE_REGION: ${BLOBSTORE_REGION:-us-east-1}
+      BLOBSTORE_ACCESS_KEY: ${BLOBSTORE_ACCESS_KEY:-}
+      BLOBSTORE_SECRET_KEY: ${BLOBSTORE_SECRET_KEY:-}
     extra_hosts:
       - "workstation:${WORKSTATION_IP:-10.0.4.37}"
     depends_on:
       postgres:
         condition: service_healthy
+      garage:
+        condition: service_healthy
     ports:
       - "7373:7373"
       - "7374:7374"
-    volumes:
-      - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
   skills-rae:
@@ -335,10 +342,19 @@ services:
       PH_PORT: "7375"
       PH_MANIFEST_DIR: /etc/deepresearch/plugins
       PH_SOCKET_DIR: /run/dr-plugins
-      PH_DR_UPLOADS_DIR: /var/lib/dr-uploads
+      # Ephemeral container-local staging (writable layer, not the old
+      # dr_uploads volume). Plugins pull their inputs from Garage via the
+      # BLOBSTORE_* config and stage them here transiently.
+      PH_STAGE_DIR: /run/ph-stage
+      BLOBSTORE_ENDPOINT: ${BLOBSTORE_ENDPOINT:-http://garage:3900}
+      BLOBSTORE_REGION: ${BLOBSTORE_REGION:-us-east-1}
+      BLOBSTORE_ACCESS_KEY: ${BLOBSTORE_ACCESS_KEY:-}
+      BLOBSTORE_SECRET_KEY: ${BLOBSTORE_SECRET_KEY:-}
       PH_LOG_FORMAT: json
     depends_on:
       postgres:
+        condition: service_healthy
+      garage:
         condition: service_healthy
     expose:
       - "7375"
@@ -350,7 +366,6 @@ services:
       # ~/Adamaton-deploy/platform-plugins pointing at the source dir,
       # so plugin code can be swapped without rebuilding the image.
       - ./platform-plugins:/opt/dr-plugins:ro
-      - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
   # dispatch-worker rolled into adamaton-worker above (queue=dispatch).
@@ -716,10 +731,14 @@ volumes:
   # were copied into Garage per GARAGE_MIGRATION.md before deletion.
   garage_meta:
   garage_data:
-  # dr_uploads is the legacy NFS-backed document-staging volume, still
-  # mounted by r2g + plugin-host until those images move to core/blobstore
-  # (Phase 3). Delete this volume + both mounts in the same change that
-  # ships the blobstore-aware images.
+  # dr_uploads is the legacy document-staging volume. As of the Garage
+  # cutover (2026-05-24) NOTHING mounts it: r2g + plugin-host now read/write
+  # document blobs from Garage's dr-uploads bucket via BLOBSTORE_*. Its ~762
+  # MiB of persistent data (cag/, plugins/, wiki-seed/, zotero-sqlite/) was
+  # archived into Garage under matching prefixes (parity verified). The
+  # declaration is kept ONLY so the bytes survive as a rollback net; drop it
+  # with `docker volume rm deepresearch_dr_uploads` once the cutover is
+  # confirmed end-to-end.
   dr_uploads:
   reranker_hf_cache:
   caddy_data:
