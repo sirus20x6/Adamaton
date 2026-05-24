@@ -117,24 +117,44 @@ docker volume rm <stack>_minio_data  # only after you trust the copy
 ## F. (Phase 3, gated) Document blobs + drop NFS
 
 Do this **only after** the blobstore-aware `r2g` and `plugin-host` images are
-built and their tags pinned in `image-tags.env`:
+built and their tags pinned in `image-tags.env`.
 
-1. Copy any existing document blobs into Garage `dr-uploads`, preserving the
-   `zotero/<key>.pdf` layout. General uploads move under the `uploads/`
-   prefix (new scheme):
-   ```bash
-   # zotero PDFs keep their key:
-   AWS_ACCESS_KEY_ID=$BLOBSTORE_ACCESS_KEY AWS_SECRET_ACCESS_KEY=$BLOBSTORE_SECRET_KEY \
-   aws --endpoint-url http://localhost:3900 s3 sync /mnt/pi-uploads/zotero s3://dr-uploads/zotero
-   ```
-   (Loose UUID staging files are read-once and in-flight only — safe to drop
-   rather than migrate.)
+> **⚠️ STOP — `dr_uploads` is NOT disposable on pi5 (verified 2026-05-24).**
+> An earlier draft of this section claimed `dr_uploads` held only "loose,
+> read-once, in-flight" staging files safe to drop. That is **wrong** for the
+> live pi5 volume. `deepresearch_dr_uploads` is a **local** docker volume
+> (not NFS — pi5 has no NFS client mounts, only the `nfsd` kernel module) and
+> holds **~782 MB of persistent data** that the blobstore migration does NOT
+> touch:
+>
+> | Path under `/var/lib/dr-uploads/` | What it is | Migrated by new code? |
+> |-----------------------------------|------------|------------------------|
+> | `cag/<uuid>/<model>/` (930 dirs)  | CAG cache (.md/.txt/.json) | **No** |
+> | `plugins/<plugin>/<uuid>/`        | plugin outputs (.md)       | **No** |
+> | `wiki-seed/`                      | seed corpus                | **No** |
+> | `zotero-sqlite/`                  | 7 sqlite DBs               | **No** |
+>
+> There are **no `zotero/<key>.pdf` files** in the volume — the PDF-migration
+> step below has nothing to copy. The new `r2g`/`plugin-host` blobstore code
+> only reroutes the *upload* path (`uploads/<uuid>`) and *plugin-staging* path
+> (`plugin/<...>`); it never reads or writes `cag/`, `plugins/`, `wiki-seed/`,
+> or `zotero-sqlite/`. So **dropping the volume (step 3) would lose persistent
+> data and break whatever still writes those paths.** Reconcile this first:
+> decide whether those dirs stay on a retained local volume, move to Garage
+> under their own prefixes, or are intentionally abandoned — do NOT blanket-
+> delete. Steps 2–4 below are blocked until that decision is made.
+
+1. ~~Copy zotero PDFs into Garage~~ — **no-op on pi5**: no PDFs in the volume.
+   General document *uploads* already route to `uploads/<uuid>` via the new
+   r2g code; nothing to backfill.
 2. Add `BLOBSTORE_ENDPOINT=http://garage:3900`, `BLOBSTORE_REGION=us-east-1`,
    `BLOBSTORE_ACCESS_KEY`, `BLOBSTORE_SECRET_KEY` to the `r2g` and
    `plugin-host` service env; give plugin-host a container-local ephemeral
-   staging dir in place of the NFS mount.
-3. Delete the `dr_uploads:` volume and both `- dr_uploads:/var/lib/dr-uploads`
-   mounts from compose.
-4. Remove the `/mnt/pi-deepresearch` and `/mnt/pi-uploads` entries from
-   `/etc/fstab` on this host (needs sudo); retire the Python `worker-hi`
-   service (Phase 4).
+   staging dir (`PH_STAGE_DIR`) in place of the NFS mount. (Additive and safe;
+   the new images fail-soft to 503 if these are absent.)
+3. **BLOCKED (see STOP box):** removing the `dr_uploads:` volume + the two
+   `- dr_uploads:/var/lib/dr-uploads` mounts is unsafe until the `cag/` /
+   `plugins/` / `wiki-seed/` / `zotero-sqlite/` data is accounted for.
+4. The `/mnt/pi-deepresearch` / `/mnt/pi-uploads` fstab cleanup is a **no-op on
+   pi5** (no such mounts here). Retiring the Python `worker-hi` service is
+   tracked separately (Phase 4) and is independent of this volume question.
