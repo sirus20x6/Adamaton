@@ -143,6 +143,11 @@ built and their tags pinned in `image-tags.env`.
 > decide whether those dirs stay on a retained local volume, move to Garage
 > under their own prefixes, or are intentionally abandoned — do NOT blanket-
 > delete. Steps 2–4 below are blocked until that decision is made.
+>
+> **✅ RESOLVED 2026-05-24:** all four prefixes were archived to Garage
+> (`dr-uploads/legacy/`, 4045/4045 files, 762 MiB — see step 3 below). The
+> volume is now unmounted from every service and fully recoverable from Garage,
+> so the drop in step 4 is unblocked (left to the operator).
 
 1. ~~Copy zotero PDFs into Garage~~ — **no-op on pi5**: no PDFs in the volume.
    General document *uploads* already route to `uploads/<uuid>` via the new
@@ -170,13 +175,32 @@ built and their tags pinned in `image-tags.env`.
    `POST /platform/sources/upload` round-tripped a 46 B file to
    `uploads/<uuid>.txt` in the Garage `dr-uploads` bucket (confirmed via
    `mc stat`, byte size matched), then cleaned up.
-3. **STILL BLOCKED (see STOP box):** the upload/staging *path* is cut over, but
-   removing the `dr_uploads:` volume is unsafe until the persistent `cag/` /
-   `plugins/` / `wiki-seed/` / `zotero-sqlite/` data is moved into Garage (the
-   chosen disposition) and its readers repointed. The volume is still declared
-   and untouched as a rollback net; nothing mounts it anymore. This data move
-   is the next work item — it requires auditing what code reads those prefixes
-   (CAG cache in deepresearch, plugin outputs in plugin-host) before relocating.
-4. The `/mnt/pi-deepresearch` / `/mnt/pi-uploads` fstab cleanup is a **no-op on
-   pi5** (no such mounts here). Retiring the Python `worker-hi` service is
-   tracked separately (Phase 4) and is independent of this volume question.
+3. ✅ **Persistent data moved into Garage 2026-05-24.** The four prefixes were
+   archived to the `dr-uploads` bucket under the `legacy/` prefix via
+   `mc mirror` (volume mounted read-only). Parity verified: **4045/4045 files**,
+   762 MiB. Breakdown: `cag/` 1860 files (24.8 MB), `plugins/` 2180 files
+   (5.9 MB), `zotero-sqlite/` 5 files (744 MB — the bulk), `wiki-seed/` empty
+   (nothing to copy). Restore any prefix with
+   `mc mirror g/dr-uploads/legacy/<prefix> <dest>`.
+
+   Audit of the readers (why a straight S3 cutover wasn't possible for all):
+   - `plugins/` — already superseded; plugin outputs now stage to
+     `PH_STAGE_DIR` + commit to Garage key `plugin/` (#34). Old dir unused.
+   - `zotero-sqlite/` — **live SQLite**, opened by the zotero plugin via
+     `sqlite3.connect(path, mode=ro&immutable=1)` (random-access; can't run on
+     S3). The current zotero config (`platform.plugin_config`, updated
+     2026-05-15) points `sqlite_path` at a staged path, and new uploads already
+     mirror the DB to Garage (`plugin/zotero/<run>/`). These `legacy/` copies
+     are older staging snapshots (Apr 25–May 8), kept as an archive.
+   - `cag/` / `wiki-seed/` — no active reader/writer in the current Go/Python
+     services (last written via a now-removed mount, likely the Python
+     `worker-hi` being retired in Phase 4). Archived for safety.
+
+4. **Volume drop — deferred to the operator.** `dr_uploads` is unmounted from
+   every service and fully archived to Garage `legacy/`, so it is now safe to
+   drop. NOT done automatically: dropping it makes Garage the sole copy of the
+   744 MB of zotero SQLite DBs. When ready:
+   `docker volume rm deepresearch_dr_uploads` (after `docker compose` no longer
+   references it — the `volumes:` declaration can be removed in the same change).
+   The `/mnt/pi-deepresearch` / `/mnt/pi-uploads` fstab cleanup is a **no-op on
+   pi5** (no such mounts). Retiring the Python `worker-hi` is Phase 4.
