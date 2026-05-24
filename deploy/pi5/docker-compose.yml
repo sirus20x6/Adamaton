@@ -451,13 +451,17 @@ services:
       - "3900:3900"
       - "3903:3903"
     healthcheck:
-      # /health is the unauthenticated admin liveness endpoint — 200 once the
-      # node is up and a layout is applied. It reports unhealthy until layout
-      # apply, which is the correct loud signal during bootstrap.
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:3903/health || exit 1"]
+      # The dxflrs/garage image is distroless — no shell, no wget/curl — so the
+      # healthcheck must be exec-form and use the only binary present, /garage.
+      # `garage status` connects over RPC and exits 0 once the node is up; it is
+      # the liveness signal `dataset-worker`'s depends_on gates on. (The :3903
+      # /health endpoint would be a richer "layout applied" check but there is
+      # no in-image HTTP client to call it with.)
+      test: ["CMD", "/garage", "status"]
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   dataset-worker:
