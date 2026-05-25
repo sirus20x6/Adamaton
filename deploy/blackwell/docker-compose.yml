@@ -73,7 +73,10 @@ services:
     # image keeps publishing for one release cycle so `bin/adam deploy
     # --rollback` can re-spawn the standalone service block.
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker-gpu:${ADAMATON_WORKER_TAG:-main}
-    hostname: blackwell
+    # Kernel hostname follows the node-identity env so the container name
+    # matches the registered @suffix. Cosmetic after core's workerregistry
+    # reads WORKER_HOSTNAME directly; kept aligned to avoid confusion.
+    hostname: ${WORKER_HOSTNAME:-workstation}
     env_file: [.env, image-tags.env]
     environment:
       WORKER_QUEUES: evo
