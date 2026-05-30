@@ -228,7 +228,7 @@ deps: ## Download dependencies
 	go mod tidy
 
 # Testing targets
-.PHONY: test lint format test-coverage ci
+.PHONY: test lint format test-coverage ci test-knowledge test-delegator test-platform test-deepresearch test-evolve
 
 test: ## Run unit tests with race detector
 	@echo "🧪 Running unit tests..."
@@ -557,6 +557,26 @@ performance-tests: ## Run performance and benchmark tests
 
 full-test-suite: test integration-tests performance-tests ## Run complete test suite
 	@echo "✅ All tests completed"
+
+test-knowledge: ## Run go test ./... in the knowledge sub-repo
+	@echo "🧪 Testing knowledge..."
+	cd knowledge && go test ./...
+
+test-delegator: ## Run go test ./... in the delegator sub-repo
+	@echo "🧪 Testing delegator..."
+	cd delegator && go test ./...
+
+test-platform: ## Run go test ./... in the platform sub-repo
+	@echo "🧪 Testing platform..."
+	cd platform && go test ./...
+
+test-deepresearch: ## Run go test ./... in the deepresearch sub-repo
+	@echo "🧪 Testing deepresearch..."
+	cd deepresearch && go test ./...
+
+test-evolve: ## Run go test ./... in the evolve sub-repo
+	@echo "🧪 Testing evolve..."
+	cd evolve && go test ./...
 
 metrics-dashboard: ## Open metrics and performance dashboard
 	@echo "📊 Opening performance dashboard..."
