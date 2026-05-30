@@ -97,3 +97,11 @@ Memory dir at `~/.claude/projects/-thearray-git-Adamaton/memory/`. Pre-Adamaton 
 - `workstation` — local dev (postgres + temporal-dev only)
 
 See `docs/DEPLOY.md` for rollback and per-host troubleshooting.
+
+## Developer docs
+
+- [docs/LOCAL_DEV.md](docs/LOCAL_DEV.md) — full local bring-up: Postgres `:5433`, Temporal `:7233`, ztok build, go.work
+- [docs/TESTING.md](docs/TESTING.md) — shared docker-test harness, `GOGENTS_SKIP_DOCKER_TESTS`, integration prereqs
+- [docs/CROSS_MODULE.md](docs/CROSS_MODULE.md) — multi-module replace + go.work gotchas, worktree breakage, delegator-mcp build
+- [docs/BIN_ADAM_REFERENCE.md](docs/BIN_ADAM_REFERENCE.md) — full reference for `bin/adam` subcommands
+- [docs/DASHBOARD_DEV.md](docs/DASHBOARD_DEV.md) — running `platform/dashboard/apiserver` locally + Vite proxy
