@@ -20,6 +20,21 @@
 
 You are working in the Adamaton umbrella repo. The 7 sub-repos (core, frontend, knowledge, deepresearch, platform, delegator, evolve) are submodules pinned by SHA.
 
+## Definition of done
+
+A task is **not complete** until the work is **committed, opened as a PR, and merged**.
+"I wrote the code and it builds" is not done; "the PR is merged" is done.
+
+- **Do not ask for confirmation** before committing, pushing, opening PRs, or merging.
+  These are the expected, standing-authorized steps for every change — just do them.
+- After a sub-repo PR merges, **bump the umbrella pin** (`bin/adam bump <sub-repo>`) so
+  `main` reflects the merged SHA. Umbrella-level file changes (docs, this CLAUDE.md)
+  land via their own umbrella PR (pins still go through `bin/adam bump`).
+- **Deploying is the exception** — `bin/adam deploy <host>` / `bin/adam ship` stays
+  **manual**. Don't deploy without being asked, and confirm before doing so.
+- Verify before merging (build + test/lint as the component requires). Don't merge
+  red. Reserve `--admin`/force for cases the user explicitly approves.
+
 ## The two worktree modes
 
 **Single-component work** (most tasks): create a worktree of the sub-repo, not the umbrella.
