@@ -447,8 +447,19 @@ services:
       # via the compose service name.
       ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://10.0.4.20:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
       DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN}
+      # Persistent-terminal backend for the Projects feature. tmux keeps
+      # sessions alive across reload/restart; set to "none" to disable the
+      # terminal endpoints entirely. The evo-api image ships tmux + bash.
+      PTY_BACKEND: ${PTY_BACKEND:-tmux}
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
+      # Projects feature: registered project folders are stored as absolute
+      # host paths; the terminal feature runs `tmux -c <path>` and the
+      # file-tree reads from them, so they must be visible in the container
+      # at the SAME path. Point ADAM_PROJECTS_ROOT at the directory your
+      # registered repos live under. Defaults to a placeholder so the mount
+      # is harmless until an operator sets it (same path in and out).
+      - ${ADAM_PROJECTS_ROOT:-/srv/adam-projects}:${ADAM_PROJECTS_ROOT:-/srv/adam-projects}:rw
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/projects:/root/.claude/projects:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/codex/memories:/root/.codex/memories:ro
