@@ -22,18 +22,33 @@ You are working in the Adamaton umbrella repo. The 7 sub-repos (core, frontend, 
 
 ## Definition of done
 
-A task is **not complete** until the work is **committed, opened as a PR, and merged**.
-"I wrote the code and it builds" is not done; "the PR is merged" is done.
+A task is **not complete** until the change is **committed → PR'd → merged → bumped → deployed → verified**.
+"I wrote the code and it builds" is not done. "The PR is merged" is not done either, if the change has
+not reached where it runs. **Do not leave work uncommitted, un-PR'd, un-merged, un-bumped, or
+un-deployed**, and do not report a half-finished change as complete. If you genuinely must stop early,
+say so explicitly and name the exact steps that remain — don't let it read as finished.
 
-- **Do not ask for confirmation** before committing, pushing, opening PRs, or merging.
-  These are the expected, standing-authorized steps for every change — just do them.
-- After a sub-repo PR merges, **bump the umbrella pin** (`bin/adam bump <sub-repo>`) so
-  `main` reflects the merged SHA. Umbrella-level file changes (docs, this CLAUDE.md)
-  land via their own umbrella PR (pins still go through `bin/adam bump`).
-- **Deploying is the exception** — `bin/adam deploy <host>` / `bin/adam ship` stays
-  **manual**. Don't deploy without being asked, and confirm before doing so.
-- Verify before merging (build + test/lint as the component requires). Don't merge
-  red. Reserve `--admin`/force for cases the user explicitly approves.
+- **Do not ask for confirmation** before committing, pushing, opening PRs, merging, or bumping — these
+  are standing-authorized for every change. Just do them.
+- After a sub-repo PR merges, **bump the umbrella pin** (`bin/adam bump <sub-repo>`) so `main` reflects
+  the merged SHA. Code merged in a sub-repo is invisible to the umbrella — and to everything that builds
+  from it — until the pin is bumped. (Umbrella-level changes — docs, this file — land via their own
+  umbrella PR; there is no pin to bump.)
+- **Deploy is part of done, not an afterthought.** Carry the change to where it actually runs and
+  **verify the running artifact carries it** — do not trust "it built":
+  - **Rebuilding/reinstalling a local artifact** (e.g. `delegator-mcp`) and **cycling any stale
+    long-running process** so it picks up the new build is **required and standing-authorized** — do it
+    without asking. The `go.work` build resolves each module from its **local submodule checkout**, so
+    `git -C <sub> checkout <merged-sha>` (or `git submodule update`) **before** building, then verify the
+    binary actually contains the change (e.g. grep for the new symbols/strings) and install it to the
+    launch path. A replaced binary shows as `…(deleted)` in `/proc/<pid>/exe`; restart those processes.
+    See [docs/CROSS_MODULE.md](docs/CROSS_MODULE.md) and [docs/WORKTREE_WORKFLOW.md](docs/WORKTREE_WORKFLOW.md).
+  - **Disruptive shared-infra rollouts** (`bin/adam deploy <host>`, `bin/adam ship`, fleet promote to
+    pi5 / pi5-speaker / blackwell) are outward-facing and hard to reverse — **confirm before executing**.
+    But the task is still not done until it is rolled out and verified; if you stop at "merged + bumped,"
+    say so and name the deploy step that remains.
+- **Verify before merging** (build + test/lint as the component requires). Don't merge red. Reserve
+  `--admin`/force for cases the user explicitly approves.
 
 ## The two worktree modes
 
