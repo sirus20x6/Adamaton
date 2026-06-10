@@ -695,6 +695,21 @@ host_platform() {
     echo "${!key:-linux/arm64}"
 }
 
+# ensure_binfmt <platform>: cross-arch buildx needs the qemu binfmt
+# handler registered with the kernel. tonistiigi/binfmt registration
+# CLEARS ON EVERY REBOOT and the failure mode is a confusing mid-build
+# "exec format error" in RUN steps. Idempotent: no-op when the target
+# arch is native or the handler is already registered.
+ensure_binfmt() {
+    local platform="$1"
+    [[ "$platform" == *arm64* ]] || return 0
+    [[ "$(uname -m)" == "x86_64" ]] || return 0
+    [[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]] && return 0
+    echo "    binfmt: registering arm64 qemu handler (clears on reboot)"
+    docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null \
+        || die "binfmt registration failed; run manually: docker run --privileged --rm tonistiigi/binfmt --install arm64"
+}
+
 # service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
 # sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
 # the source (used for SHA tag + dirty check). image_name is the registry
@@ -763,6 +778,7 @@ cmd_ship() {
     [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
     load_ship_env
     local host="$1"; shift
+    ensure_binfmt "$(host_platform "$host")"
     local svc spec sub_repo dockerfile context image target go_tags compose_svc service_name tag dirty img_ref status
     for svc in "$@"; do
         if ! spec="$(ship_service_spec "$svc")"; then
@@ -861,6 +877,7 @@ cmd_ship_self() {
     local img_ref="${WORKSTATION_IP}:5000/adamaton-deploy-agent"
     echo "==> ship-self: deploy-agent -> $img_ref:$tag on $host"
 
+    ensure_binfmt "$(host_platform "$host")"
     if ! docker buildx build \
         --platform "$(host_platform "$host")" \
         --push \
@@ -1070,6 +1087,7 @@ EOF_DAEMON
     # We bypass the registry on this one image (chicken-and-egg) by using
     # --load instead of --push, then docker save | ssh docker load.
     echo "    [6/8] building bootstrap deploy-agent (arm64, local load)"
+    ensure_binfmt "$(host_platform "$host")"
     if ! docker buildx build \
             --platform "$(host_platform "$host")" \
             --load \
