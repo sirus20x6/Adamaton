@@ -260,6 +260,8 @@ GC is only safe when the registry is read-only. For a thorough sweep, edit the r
 
 **`deploy-agent self-update must use ssh`** -- you tried `bin/adam ship <host> deploy-agent`. Use `bin/adam ship-self <host>` instead.
 
+**`exec format error` in a RUN step of an arm64 build** -- the qemu binfmt handler isn't registered (it clears on every workstation reboot). `bin/adam ship`/`ship-self`/`bootstrap` now self-heal this via `ensure_binfmt` before any cross-arch buildx; if you hit it from a hand-rolled buildx call, run `docker run --privileged --rm tonistiigi/binfmt --install arm64`.
+
 **`docker compose pull` fails inside the agent after a successful `bin/adam ship`** -- the Pi can't reach the workstation registry. Check from the Pi: `curl http://10.0.4.37:5000/v2/_catalog`. Common causes: workstation rebooted and the registry didn't come back (it has `--restart=unless-stopped`, so check with `docker ps -a`); Pi's `daemon.json` was reverted; firewall in between.
 
 **Agent returns 200 but the new tag never shows up in `/deploy/status`** -- known v1 sharp edge: the agent writes the tag BEFORE confirming the pull succeeded. If the pull failed, `image-tags.env` now references a tag that doesn't exist. Re-ship to repair; the next push overwrites the line.
