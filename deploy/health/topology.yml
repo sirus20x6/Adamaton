@@ -117,13 +117,6 @@ roles:
     heartbeat_max_age: 90s
     description: "Cross-service dispatch + delegation routing"
 
-  evo-worker:
-    kind: temporal_queue
-    queue: evo
-    min_healthy: 0
-    heartbeat_max_age: 90s
-    description: "Evolve loop workers (GPU-bound; cold by default on Pi)"
-
 # Named user-facing rollups. Each capability's status = worst of its
 # (non-optional, online-required) member roles.
 capabilities:

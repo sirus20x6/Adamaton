@@ -11,6 +11,3 @@ services:
   - adamaton-worker     # unified — replaces evo-worker-kernel
   - distill-trainer     # DPO+LoRA trainer (gated behind --profile=train)
   - deploy-agent        # push-deploy receiver
-  # Kept allow-listed for one release cycle so a rollback to the
-  # pre-consolidation SHA can still drive its restart.
-  - evo-worker          # KernelBench candidate evaluator on CUDA (deprecated)
