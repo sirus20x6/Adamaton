@@ -24,7 +24,7 @@
 #   - figure-renderer — matplotlib sidecar invoked by nano-research
 #   - reranker — cross-encoder reranker for r2g
 #   - evo-api (Go) — dashboard/aggregator API (the /api/v1/* surface)
-#   - skills-worker, reindex-worker, dispatch-worker, evo-worker — Temporal workers
+#   - adamaton-worker — unified Temporal worker (skills/reindex/dispatch/evo queues)
 #   - frontend (caddy:2-alpine) — SPA host + reverse proxy (Caddyfile)
 #   - deploy-agent (Go) — push-deploy receiver; see platform/deploy-agent
 

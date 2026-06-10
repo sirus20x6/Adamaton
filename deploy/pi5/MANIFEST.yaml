@@ -43,4 +43,3 @@ services:
   - skills-worker
   - reindex-worker
   - dispatch-worker
-  - evo-worker
