@@ -11,6 +11,10 @@
 #   - temporal: temporalio/temporal:1.27 in dev (in-memory persistence) so
 #     starting a workflow doesn't need a separate db. Production temporal on
 #     the Pi uses postgres12 persistence.
+#   - bge-embed: llama-server hosting bge-m3 GGUF. Native replacement for
+#     the embedding half of the deepresearch platform-sidecar Python
+#     container. Stays on workstation:8092 for cross-host callers (Pi r2g
+#     and skills-rae point at 10.0.4.37:8092 via .env).
 
 services:
   postgres:
@@ -62,6 +66,47 @@ services:
       - "7233:7233"  # gRPC frontend
       - "7234:7234"  # HTTP API
       - "8233:8233"  # Temporal Web UI
+    restart: unless-stopped
+
+  bge-embed:
+    image: 10.0.4.37:5000/adamaton-bge-embed:${ADAMATON_BGE_EMBED_TAG:-main}
+    container_name: adamaton-workstation-bge-embed
+    # Flags mirror deploy/worker-types/bge-embed.yml — when bge-embed
+    # eventually moves to dashboard-provisioned, the catalog YAML wins
+    # and this block goes away. --pooling cls matches bge-m3's CLS-token
+    # pooling; anything else produces semantically different vectors.
+    command:
+      - --model
+      - /models/bge-m3-f16.gguf
+      - --embedding
+      - --pooling
+      - cls
+      - -c
+      - "8192"
+      # Physical batch must fit the largest single input. llama.cpp embeddings
+      # require the whole input in one ubatch; the default --ubatch-size is 512,
+      # so any chunk over ~512 tokens fails with HTTP 500 "input too large to
+      # process; increase the physical batch size". r2g chunks at ~1024 tokens
+      # and bge-m3's max is 8192, so match -c 8192. (-b must be >= -ub.)
+      - -b
+      - "8192"
+      - -ub
+      - "8192"
+      - --port
+      - "8092"
+      - --host
+      - "0.0.0.0"
+      - -ngl
+      - "${BGE_EMBED_NGL:-99}"
+    ports:
+      - "8092:8092"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
 volumes:

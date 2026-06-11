@@ -20,15 +20,12 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         reverse_proxy postgrest:3000
     }
 
-    # WebSocket — must precede the broader API routes.
-    @ws path /ws/*
-    handle @ws {
-        reverse_proxy backend:7272 {
-            transport http {
-                read_timeout 24h
-            }
-        }
-    }
+    # WebSocket — formerly proxied to the Python R2R backend at
+    # backend:7272, which was retired per docs/WHERE_DID_IT_GO.md
+    # ("platform/backend/ — Python R2R-era code; functionality long
+    # since reimplemented in r2g + plugin-host"). Routes can be
+    # restored if/when a Go service implements the equivalent
+    # streaming surface.
 
     # r2g full cutover (2026-05-14): the audited /v3 endpoints come from the
     # Go reimplementation. Anything else under /v3/* falls through to R2R
@@ -97,15 +94,30 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
         }
     }
 
-    # Backend REST API + platform routers (Python fallback).
-    @api path /v3/* /platform/*
-    handle @api {
-        reverse_proxy backend:7272 {
+    # /platform/health/* compat shim — the SPA's existing
+    # useSystemHealth() hook polls /platform/health/ready, which used
+    # to land on the Python R2R backend. evo-api now serves a
+    # back-compat adapter at those paths (see
+    # platform/dashboard/apiserver/health_endpoints.go). The bearer
+    # injection mirrors @evoapi below so the request hits evo-api
+    # authenticated without the SPA ever seeing the token.
+    @platform_health path /platform/health/ready /platform/health/live
+    handle @platform_health {
+        header Cache-Control "no-store"
+        request_header Authorization "Bearer {env.EVO_API_TOKEN}"
+        reverse_proxy evo-api:9123 {
             transport http {
-                read_timeout 300s
+                read_timeout 30s
             }
         }
     }
+
+    # NOTE: /v3/* and /platform/* fallthrough to backend:7272 was
+    # removed on 2026-05-18 — the Python R2R backend has been retired
+    # (docs/WHERE_DID_IT_GO.md). Everything that has a Go replacement
+    # is matched by the @r2g / @platform_r2g / @skills_rae /
+    # @plugin_host blocks above. Unmatched /v3/* and /platform/*
+    # requests now 404, which is the correct loud failure mode.
 
     # evo-api dashboard/aggregator. Server-side bearer auth injected so the
     # React bundle in the SPA below can talk to it same-origin without ever
@@ -152,6 +164,47 @@ deepresearch.local, deepresearch, adamaton.local, adamaton {
     handle @deploy_agent {
         uri strip_prefix /deploy
         reverse_proxy deploy-agent:9128
+    }
+
+    # v1.0 / v1.1 on-chain observability daemons. Each daemon's HTTP
+    # surface is bound to 0.0.0.0 inside its own container; Caddy is
+    # what enforces the public-loopback boundary. The frontend Network
+    # section calls /network-api/<daemon>/<path>; we strip the prefix
+    # so the daemon sees its own native path.
+    #
+    # Daemons currently wired: audit-monitor, federation-monitor,
+    # ledger-monitor, finalize-bot. All four serve via the
+    # /network-api/<daemon>/* path scheme so the frontend Network
+    # section can address them with a single proxy convention.
+    @audit_monitor path /network-api/audit/*
+    handle @audit_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/audit
+        reverse_proxy audit-monitor:9275
+    }
+    @federation_monitor path /network-api/federation/*
+    handle @federation_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/federation
+        reverse_proxy federation-monitor:9276
+    }
+    @ledger_monitor path /network-api/ledger/*
+    handle @ledger_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/ledger
+        reverse_proxy ledger-monitor:9277
+    }
+    @finalizer_monitor path /network-api/finalizer/*
+    handle @finalizer_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/finalizer
+        reverse_proxy finalize-bot:9278
+    }
+    @stealth_monitor path /network-api/stealth/*
+    handle @stealth_monitor {
+        header Cache-Control "no-store"
+        uri strip_prefix /network-api/stealth
+        reverse_proxy stealthmonitor:9279
     }
 
     # SPA: static file server with index.html fallback.

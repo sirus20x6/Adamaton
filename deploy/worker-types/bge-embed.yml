@@ -1,0 +1,53 @@
+# Worker-types catalog entry — bge-embed.
+#
+# Native (no-Python) replacement for the embedding half of the legacy
+# Qwen-Reranker + bge-m3 sidecar that runs at workstation:8089. Backed
+# by llama.cpp's llama-server binary; the BAAI/bge-m3 GGUF is baked into
+# the image so first-start is a single image pull, no model download.
+#
+# GPU-only in v1: requires nvidia-runtime on the host (workstation).
+# Pi support is a future arm64 image + smaller-quant variant, gated on
+# multi-arch buildx.
+
+service:
+  hostname: ${WORKER_HOSTNAME:-unknown}-bge-embed
+  image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-bge-embed:${ADAMATON_BGE_EMBED_TAG:-main}
+  env_file: [.env, image-tags.env]
+  # llama-server flags. --pooling cls matches bge-m3's training-time CLS
+  # pooling — anything else (mean, last) produces semantically different
+  # vectors that callers won't recognise. -c 8192 mirrors bge-m3's max
+  # context. -ngl 99 puts every layer on GPU when CUDA is available;
+  # arm64/CPU variants will override this to 0 via .env.
+  #
+  # -b/-ub 8192: physical batch must fit the largest single input. llama.cpp
+  # embeddings require the whole input in one ubatch; the default --ubatch-size
+  # is 512, so chunks over ~512 tokens fail with HTTP 500 "input too large to
+  # process". r2g chunks at ~1024 tokens; match -c 8192. (-b must be >= -ub.)
+  command:
+    - --model
+    - /models/bge-m3-f16.gguf
+    - --embedding
+    - --pooling
+    - cls
+    - -c
+    - "8192"
+    - -b
+    - "8192"
+    - -ub
+    - "8192"
+    - --port
+    - "8092"
+    - --host
+    - "0.0.0.0"
+    - -ngl
+    - "${BGE_EMBED_NGL:-99}"
+  ports:
+    - "8092:8092"
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+  restart: unless-stopped

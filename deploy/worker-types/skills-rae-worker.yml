@@ -17,6 +17,10 @@ service:
   entrypoint: ["/usr/local/bin/skills-rae-worker"]
   environment:
     SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKER_POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+    # BGE_EMBED_URL points at the native llama-server bge-embed (preferred).
+    # BGE_SIDECAR_URL kept as fallback during migration off the Python
+    # sidecar; will be removed once LOAD_EMBED_MODEL=false is flipped.
+    BGE_EMBED_URL: ${BGE_EMBED_URL:-http://workstation:8092}
     BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://workstation:8089}
     CLUSTER_SIDECAR_URL: ${CLUSTER_SIDECAR_URL:-http://workstation:8091}
     SKILLS_RAE_EMBED_MODEL: bge-m3

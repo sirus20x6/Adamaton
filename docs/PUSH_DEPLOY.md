@@ -184,6 +184,12 @@ bin/adam ship-self pi5
 
 Note that `bin/adam ship pi5 deploy-agent` is rejected at the agent with `400 deploy-agent self-update must use ssh` -- this is intentional.
 
+### Inception caveat: a stale deploy-agent will silently ship to OLD logic
+
+The running agent isn't refreshed by anything except `bin/adam ship-self` (it intentionally can't restart itself mid-call). So if you change deploy-agent code and merge it, `bin/adam ship pi5 evo-api` will still go through the *previous* agent until you `bin/adam ship-self pi5`. Symptom seen in practice: a service's tag gets updated in `image-tags.env` and `docker compose pull` succeeds, but the container is never recreated -- because the running agent predates the `--force-recreate` flag added in commit `8567bb87`. The fix is in the source, but only ships to the host via `ship-self`.
+
+Rule of thumb: any merged deploy-agent change requires `bin/adam ship-self <host>` for every host before the next regular `bin/adam ship` to that host will behave per the new logic. `docker ps --filter name=deploy-agent --format '{{.Status}}'` tells you when the agent was last refreshed -- if it's been "Up N hours" since before your deploy-agent merge, you're still running the old binary.
+
 ## Reading status
 
 | Endpoint | Method | What it returns |
@@ -253,6 +259,8 @@ GC is only safe when the registry is read-only. For a thorough sweep, edit the r
 **`service not in allow-list`** -- the host's `MANIFEST.yaml` doesn't list that service. Edit `deploy/<host>/MANIFEST.yaml`, add the service to the `services:` list, redeploy the manifest to the Pi (rsync or whatever `bin/adam deploy` uses), then `docker compose up -d deploy-agent` to make the agent reload it. The manifest is read once at agent boot.
 
 **`deploy-agent self-update must use ssh`** -- you tried `bin/adam ship <host> deploy-agent`. Use `bin/adam ship-self <host>` instead.
+
+**`exec format error` in a RUN step of an arm64 build** -- the qemu binfmt handler isn't registered (it clears on every workstation reboot). `bin/adam ship`/`ship-self`/`bootstrap` now self-heal this via `ensure_binfmt` before any cross-arch buildx; if you hit it from a hand-rolled buildx call, run `docker run --privileged --rm tonistiigi/binfmt --install arm64`.
 
 **`docker compose pull` fails inside the agent after a successful `bin/adam ship`** -- the Pi can't reach the workstation registry. Check from the Pi: `curl http://10.0.4.37:5000/v2/_catalog`. Common causes: workstation rebooted and the registry didn't come back (it has `--restart=unless-stopped`, so check with `docker ps -a`); Pi's `daemon.json` was reverted; firewall in between.
 

@@ -30,3 +30,7 @@
 
 # Go build cache when a stray go build lands here
 /go.sum
+
+# Local delegator-mcp build + timestamped backup snapshots (~50MB each)
+/bin/delegator-mcp
+/bin/*.bak*

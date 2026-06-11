@@ -24,4 +24,5 @@ use (
 	./platform/dispatch
 	./platform/plugin-host
 	./platform/temporal
+	./platform/worker
 )
