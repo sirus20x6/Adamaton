@@ -221,6 +221,14 @@ services:
       - "7376"
     ports:
       - "7376:7376"
+    # debian-slim image has no curl/wget; speak minimal HTTP over
+    # bash /dev/tcp to the /healthz route (db-ping-backed).
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7376; printf 'GET /healthz HTTP/1.0\r\n\r\n' >&3; head -1 <&3 | grep -q 200"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   skills-rae-worker:
@@ -336,6 +344,13 @@ services:
       - nano_workspace:/var/lib/nano-research
     expose:
       - "7378"
+    # Alpine image: busybox wget probes /healthz.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7378/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   nano-research-worker:
@@ -435,6 +450,15 @@ services:
       # ~/Adamaton-deploy/platform-plugins pointing at the source dir,
       # so plugin code can be swapped without rebuilding the image.
       - ./platform-plugins:/opt/dr-plugins:ro
+    # gRPC on 7375 — a TCP connect is the readiness signal. The
+    # debian-slim image has no curl/wget; bash /dev/tcp avoids
+    # adding one (CMD-SHELL would run dash, which lacks /dev/tcp).
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7375"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   # dispatch-worker rolled into adamaton-worker above (queue=dispatch).
@@ -506,6 +530,13 @@ services:
         condition: service_started
     expose:
       - "9123"
+    # Alpine image: busybox wget probes the unauthenticated /livez.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9123/livez"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   # ---- evolve sub-repo (rolled into adamaton-worker above as queue=evo) ----
