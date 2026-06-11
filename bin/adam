@@ -774,6 +774,45 @@ ship_service_spec() {
     esac
 }
 
+# ship_frontend <host>: the frontend is not a registry image — it's a vite
+# bundle bind-mounted into the caddy container as ./frontend-dist (see the
+# frontend service in deploy/pi5/docker-compose.yml). Build it from the
+# frontend submodule, refresh deploy/pi5/frontend-dist/ (the source of truth
+# a full `adam deploy` rsyncs), push it to the host, and restart the caddy
+# container — required even for a directory bind-mount because rsync renames
+# files in place and caddy keeps serving the old inodes (docs/PUSH_DEPLOY.md).
+ship_frontend() {
+    local host="$1"
+    local fe="$ADAM_ROOT/frontend"
+    local dist="$ADAM_ROOT/deploy/pi5/frontend-dist"
+    local ssh_target
+    ssh_target=$(host_ssh_alias "$host")
+    [[ -f "$fe/package.json" ]] || die "frontend submodule is not checked out"
+
+    echo "==> ship: frontend (vite bundle) -> $host"
+    # pnpm v11's verify-deps hook breaks `pnpm <script>` invocations, so call
+    # the vite binary directly; plain `vite build` IS the production build.
+    if [[ ! -d "$fe/node_modules" ]]; then
+        (cd "$fe" && pnpm install --silent) || die "pnpm install failed"
+    fi
+    (cd "$fe" && ./node_modules/.bin/vite build) || die "vite build failed"
+
+    mkdir -p "$dist"
+    rsync -a --delete "$fe/dist/" "$dist/" || die "local frontend-dist sync failed"
+    rsync -az --delete "$dist/" "$ssh_target:Adamaton-deploy/frontend-dist/" \
+        || die "rsync to $host failed"
+    ssh "$ssh_target" 'cd ~/Adamaton-deploy && docker compose restart frontend' \
+        || die "frontend restart on $host failed"
+
+    # Verify the bundle actually landed (the bind-mount inode trap serves
+    # stale content silently otherwise).
+    local lsum rsum
+    lsum="$(sha256sum "$dist/index.html" | cut -d' ' -f1)"
+    rsum="$(ssh "$ssh_target" 'sha256sum ~/Adamaton-deploy/frontend-dist/index.html' | cut -d' ' -f1)"
+    [[ "$lsum" == "$rsum" ]] || die "index.html checksum mismatch after rsync"
+    echo "    ok: frontend bundle live on $host (index.html ${lsum:0:12})"
+}
+
 cmd_ship() {
     [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
     load_ship_env
@@ -781,6 +820,10 @@ cmd_ship() {
     ensure_binfmt "$(host_platform "$host")"
     local svc spec sub_repo dockerfile context image target go_tags compose_svc service_name tag dirty img_ref status
     for svc in "$@"; do
+        if [[ "$svc" == "frontend" ]]; then
+            ship_frontend "$host"
+            continue
+        fi
         if ! spec="$(ship_service_spec "$svc")"; then
             die "no Dockerfile mapping for '$svc' (extend ship_service_spec in bin/adam)"
         fi
