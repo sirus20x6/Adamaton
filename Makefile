@@ -259,11 +259,15 @@ test: ## Run unit tests with race detector
 	# what lets a stale flaky test masquerade as "passing" across CI runs).
 	go test -race -count=1 -v ./...
 
-ci: format-check vet lint test vuln build ## Aggregate target run by CI
+ci: format-check vet lint test vuln build check-env ## Aggregate target run by CI
 	@echo "✅ CI checks passed"
 
 # format-check fails when the tree has unformatted Go files. Used in CI in
 # preference to `go fmt` because fmt mutates files; check just reports.
+.PHONY: check-env
+check-env: ## Verify every required compose env var is declared in .env.example
+	@./scripts/check-env-example.sh
+
 .PHONY: format-check vet
 format-check: ## Verify all Go files are gofmt-clean
 	@echo "🎨 Checking formatting..."
