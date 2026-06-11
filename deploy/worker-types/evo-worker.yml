@@ -1,5 +1,10 @@
 # Worker-types catalog entry — evo-worker.
 #
+# DEPRECATED: superseded by adamaton-worker.yml (the unified
+# build-tag-configurable container). Kept for one release cycle so
+# `bin/adam deploy --rollback` can still spawn the standalone worker
+# from a previous umbrella SHA. New nodes should use adamaton-worker.
+#
 # EVO_KERNEL_REMOTE_HOST is left blank by default so the worker only
 # handles the cheap activities. The blackwell deployment overrides it
 # via env to run kernel evals locally. Spinning up an evo-worker on a

@@ -80,6 +80,11 @@ Push-deploy (workstation registry -> deploy-agent on host):
                             Refuses to ship if the sub-repo is git-dirty.
   ship-self <host>          build + push deploy-agent and restart it on <host>
                             via ssh (the agent cannot self-restart safely).
+  sync-compose <host>       scp deploy/<host>/docker-compose.yml (+ .env.example)
+                            up to <host>:Adamaton-deploy/. Needed when compose-
+                            file changes (new env vars, new service blocks) must
+                            land on the host — bin/adam ship only pushes images.
+                            Recreate services manually afterwards.
 
   help [subcommand]
 EOF
@@ -690,6 +695,21 @@ host_platform() {
     echo "${!key:-linux/arm64}"
 }
 
+# ensure_binfmt <platform>: cross-arch buildx needs the qemu binfmt
+# handler registered with the kernel. tonistiigi/binfmt registration
+# CLEARS ON EVERY REBOOT and the failure mode is a confusing mid-build
+# "exec format error" in RUN steps. Idempotent: no-op when the target
+# arch is native or the handler is already registered.
+ensure_binfmt() {
+    local platform="$1"
+    [[ "$platform" == *arm64* ]] || return 0
+    [[ "$(uname -m)" == "x86_64" ]] || return 0
+    [[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]] && return 0
+    echo "    binfmt: registering arm64 qemu handler (clears on reboot)"
+    docker run --privileged --rm tonistiigi/binfmt --install arm64 >/dev/null \
+        || die "binfmt registration failed; run manually: docker run --privileged --rm tonistiigi/binfmt --install arm64"
+}
+
 # service -> "<sub_repo>|<dockerfile>|<context>|<image_name>"
 # sub_repo is relative to $ADAM_ROOT and identifies which git checkout owns
 # the source (used for SHA tag + dirty check). image_name is the registry
@@ -705,10 +725,22 @@ ship_service_spec() {
         plugin-host)           echo "platform|platform/plugin-host/Dockerfile|.|adamaton-plugin-host" ;;
         dispatch-worker)       echo "platform|platform/dispatch/Dockerfile|.|adamaton-dispatch-worker" ;;
         deploy-agent)          echo "platform|platform/deploy-agent/Dockerfile|.|adamaton-deploy-agent" ;;
+        # bge-embed wraps llama-server + bakes the bge-m3 GGUF in. The
+        # build context can be the tiny platform/bge-embed/ dir because
+        # the Dockerfile is FROM ggml-org/llama.cpp:server-cuda + ADD —
+        # no cross-module Go sources to pull in.
+        bge-embed)             echo "platform|platform/bge-embed/Dockerfile|platform/bge-embed|adamaton-bge-embed" ;;
         evo-api)               echo "platform|platform/dashboard/Dockerfile|.|adamaton-evo-api" ;;
         backend)               echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
         worker-lo)             echo "platform|platform/backend/Dockerfile|platform/backend|adamaton-platform-backend" ;;
-        r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|knowledge/r2g|adamaton-r2g" ;;
+        # r2g build context is the UMBRELLA root: since the ztok cgo flip
+        # the Dockerfile COPYs both `ztok` and `knowledge/r2g/` as
+        # umbrella-relative paths (it cross-builds libztok.a from the ztok
+        # source in a Zig stage). ztok is not a submodule — it must be
+        # present at the umbrella root for the build context (see
+        # adamaton_ztok_local_build_recipe). Context=knowledge fails with
+        # "/knowledge/r2g not found".
+        r2g)                   echo "knowledge|knowledge/r2g/Dockerfile|.|adamaton-r2g" ;;
         skills-rae)            echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae" ;;
         skills-rae-worker)     echo "knowledge|knowledge/skills-rae/Dockerfile|.|adamaton-skills-rae-worker" ;;
         skills-worker)         echo "knowledge|knowledge/skills/Dockerfile|.|adamaton-skills-worker" ;;
@@ -718,6 +750,26 @@ ship_service_spec() {
         figure-renderer)       echo "deepresearch|deepresearch/nano-research/sidecars/figure-renderer/Dockerfile|deepresearch/nano-research/sidecars/figure-renderer|adamaton-nano-figure-renderer" ;;
         evo-worker)            echo "evolve|evolve/evolve/Dockerfile|.|adamaton-evo-worker" ;;
         dataset-worker)        echo "evolve|evolve/dataset-manager/Dockerfile|.|adamaton-dataset-worker" ;;
+        # v1.0 / v1.1 on-chain observability daemons. Same multi-module
+        # build context as dispatch-worker because they pull from
+        # core/p2p/eth which (in v1.x) may grow replace directives across
+        # the sub-repo boundary. Each daemon reads one core/cmd/* entry-
+        # point and otherwise shares the core go.mod.
+        audit-monitor)         echo "core|core/cmd/audit-monitor/Dockerfile|.|adamaton-audit-monitor" ;;
+        federation-monitor)    echo "core|core/cmd/federation-monitor/Dockerfile|.|adamaton-federation-monitor" ;;
+        ledger-monitor)        echo "core|core/cmd/ledger-monitor/Dockerfile|.|adamaton-ledger-monitor" ;;
+        finalize-bot)          echo "core|core/cmd/finalize-bot/Dockerfile|.|adamaton-finalize-bot" ;;
+        stealthmonitor)        echo "core|core/cmd/stealthmonitor/Dockerfile|.|adamaton-stealthmonitor" ;;
+        # Unified build-tag-configurable worker. Three variants share the
+        # same Dockerfile + source tree; each variant pins a multi-stage
+        # --target and a GO_TAGS build-arg, plus a final field naming
+        # the compose service that hosts the image (so deploy-agent
+        # restart targets the right service even when ship-spec key !=
+        # service name). 7-field spec:
+        #   sub_repo|dockerfile|context|image|target|go_tags|compose_service
+        adamaton-worker-light) echo "platform|platform/worker/Dockerfile|.|adamaton-worker-light|runtime-light|skills reindex dispatch|adamaton-worker" ;;
+        adamaton-worker-full)  echo "platform|platform/worker/Dockerfile|.|adamaton-worker-full|runtime-full|skills reindex dispatch evo|adamaton-worker" ;;
+        adamaton-worker-gpu)   echo "platform|platform/worker/Dockerfile|.|adamaton-worker-gpu|runtime-gpu|evo|adamaton-worker" ;;
         *)                     return 1 ;;
     esac
 }
@@ -726,12 +778,22 @@ cmd_ship() {
     [[ $# -ge 2 ]] || die "ship: usage: adam ship <host> <service> [<service2> ...]"
     load_ship_env
     local host="$1"; shift
-    local svc spec sub_repo dockerfile context image tag dirty img_ref status
+    ensure_binfmt "$(host_platform "$host")"
+    local svc spec sub_repo dockerfile context image target go_tags compose_svc service_name tag dirty img_ref status
     for svc in "$@"; do
         if ! spec="$(ship_service_spec "$svc")"; then
             die "no Dockerfile mapping for '$svc' (extend ship_service_spec in bin/adam)"
         fi
-        IFS='|' read -r sub_repo dockerfile context image <<<"$spec"
+        # 4-field (legacy), 6-field (multi-stage target + build-arg), or
+        # 7-field (+ compose_service override for deploy-agent restart
+        # when the ship-spec key doesn't match the compose service name).
+        # IFS-read tolerates trailing empty fields.
+        target=""; go_tags=""; compose_svc=""
+        IFS='|' read -r sub_repo dockerfile context image target go_tags compose_svc <<<"$spec"
+        # service_name = what the deploy-agent's /restart endpoint
+        # expects. Defaults to the ship-spec key (matches every legacy
+        # entry); overridden to compose_svc when set (worker variants).
+        service_name="${compose_svc:-$svc}"
         local sub_path="$ADAM_ROOT/$sub_repo"
         [[ -d "$sub_path/.git" || -f "$sub_path/.git" ]] || die "sub-repo '$sub_repo' is not a git checkout"
 
@@ -746,31 +808,38 @@ cmd_ship() {
         img_ref="${WORKSTATION_IP}:5000/${image}"
         echo "==> ship: $svc -> $img_ref:$tag"
 
-        if ! docker buildx build \
-            --platform "$(host_platform "$host")" \
-            --push \
-            -t "$img_ref:$tag" \
-            -t "$img_ref:main" \
-            -f "$ADAM_ROOT/$dockerfile" \
-            "$ADAM_ROOT/$context"; then
+        local buildx_args=(
+            --platform "$(host_platform "$host")"
+            --push
+            -t "$img_ref:$tag"
+            -t "$img_ref:main"
+            -f "$ADAM_ROOT/$dockerfile"
+        )
+        if [[ -n "$target" ]]; then
+            buildx_args+=(--target "$target")
+        fi
+        if [[ -n "$go_tags" ]]; then
+            buildx_args+=(--build-arg "GO_TAGS=$go_tags")
+        fi
+        if ! docker buildx build "${buildx_args[@]}" "$ADAM_ROOT/$context"; then
             die "buildx failed for $svc"
         fi
 
         # Caddy on the Pi terminates TLS with a self-signed/local cert that
         # the workstation may not have in its trust store, so use.
         # The bearer token still authenticates the request inside the agent.
-        local restart_url="$(host_deploy_url "$host")/restart?service=${svc}&tag=${tag}"
+        local restart_url="$(host_deploy_url "$host")/restart?service=${service_name}&tag=${tag}"
         echo "    POST $restart_url"
         local resp
         if ! resp="$(curl -fsS \
                 -X POST \
                 -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" \
                 "$restart_url" 2>&1)"; then
-            die "deploy-agent rejected restart of $svc on $host: $resp"
+            die "deploy-agent rejected restart of $service_name on $host: $resp"
         fi
 
         # Poll /deploy/status until the new tag appears (or 60s elapse).
-        local status_url="$(host_deploy_url "$host")/status?service=${svc}"
+        local status_url="$(host_deploy_url "$host")/status?service=${service_name}"
         local waited=0 ok=0
         while (( waited < 60 )); do
             sleep 5
@@ -808,6 +877,7 @@ cmd_ship_self() {
     local img_ref="${WORKSTATION_IP}:5000/adamaton-deploy-agent"
     echo "==> ship-self: deploy-agent -> $img_ref:$tag on $host"
 
+    ensure_binfmt "$(host_platform "$host")"
     if ! docker buildx build \
         --platform "$(host_platform "$host")" \
         --push \
@@ -856,6 +926,57 @@ cmd_ship_self() {
 #   - ssh <host>.lan works without a password prompt
 #   - the user on the host has passwordless sudo (for the daemon.json edit
 #     + docker restart). If not, the operator gets a password prompt.
+# cmd_sync_compose: scp deploy/<host>/docker-compose.yml (and
+# .env.example, for reference) up to the host's ~/Adamaton-deploy/
+# dir. `bin/adam ship` only pushes images — compose-file changes (new
+# env vars, new service blocks) need this to actually reach the Pi.
+#
+# Intentionally minimal: no rsync, no drift detection, no merging with
+# the host's docker-compose.override.yml. The operator is responsible
+# for `cd ~/Adamaton-deploy && docker compose up -d --force-recreate
+# --no-deps <svc>` afterwards to pick up the new env. (.env on the
+# host is not touched — it's secret-bearing and operator-owned.)
+cmd_sync_compose() {
+    [[ $# -eq 1 ]] || die "sync-compose: usage: adam sync-compose <host>"
+    local host="$1"
+    local src="$ADAM_ROOT/deploy/$host/docker-compose.yml"
+    [[ -f "$src" ]] || die "no compose file at $src"
+    local ssh; ssh="$(host_ssh_alias "$host")"
+    echo "==> sync-compose: $src -> $ssh:Adamaton-deploy/docker-compose.yml"
+    scp "$src" "$ssh:Adamaton-deploy/docker-compose.yml" || die "scp failed"
+    # .env.example is convenient as a reference for the operator; the
+    # real .env stays untouched on the host.
+    local env_src="$ADAM_ROOT/deploy/$host/.env.example"
+    if [[ -f "$env_src" ]]; then
+        echo "==> sync-compose: $env_src -> $ssh:Adamaton-deploy/.env.example"
+        scp "$env_src" "$ssh:Adamaton-deploy/.env.example" || echo "    warning: env.example scp failed (non-fatal)" >&2
+    fi
+    # Caddyfile — Caddy is bind-mount-served; without this an edit to
+    # the umbrella's Caddyfile never reaches the host. After a Caddyfile
+    # change the operator should `docker compose restart frontend` to
+    # avoid the pi-Caddy bind-mount inode trap (memory:
+    # pi_caddy_bind_mount_inode).
+    local caddy_src="$ADAM_ROOT/deploy/$host/Caddyfile"
+    if [[ -f "$caddy_src" ]]; then
+        echo "==> sync-compose: $caddy_src -> $ssh:Adamaton-deploy/Caddyfile"
+        scp "$caddy_src" "$ssh:Adamaton-deploy/Caddyfile" || echo "    warning: Caddyfile scp failed (non-fatal)" >&2
+    fi
+    # Fleet-health topology — bind-mounted into evo-api at
+    # /etc/adamaton/health-topology.yml. Single source-of-truth under
+    # deploy/health/ (it's fleet-wide, not per-host); copied to the
+    # per-host deploy dir on push.
+    local topo_src="$ADAM_ROOT/deploy/health/topology.yml"
+    if [[ -f "$topo_src" ]]; then
+        echo "==> sync-compose: $topo_src -> $ssh:Adamaton-deploy/health-topology.yml"
+        scp "$topo_src" "$ssh:Adamaton-deploy/health-topology.yml" || echo "    warning: topology scp failed (non-fatal)" >&2
+    fi
+    echo
+    echo "Compose synced. To apply env changes for a service:"
+    echo "  ssh $ssh 'cd Adamaton-deploy && docker compose up -d --force-recreate --no-deps <service>'"
+    echo "If the Caddyfile changed:"
+    echo "  ssh $ssh 'cd Adamaton-deploy && docker compose restart frontend'"
+}
+
 cmd_bootstrap() {
     [[ $# -eq 1 ]] || die "bootstrap: usage: adam bootstrap <host>"
     local host="$1"
@@ -966,6 +1087,7 @@ EOF_DAEMON
     # We bypass the registry on this one image (chicken-and-egg) by using
     # --load instead of --push, then docker save | ssh docker load.
     echo "    [6/8] building bootstrap deploy-agent (arm64, local load)"
+    ensure_binfmt "$(host_platform "$host")"
     if ! docker buildx build \
             --platform "$(host_platform "$host")" \
             --load \
@@ -1063,9 +1185,10 @@ case "$1" in
     clean)      shift; cmd_clean "$@" ;;
     rescue)     shift; cmd_rescue "$@" ;;
     fleet)      shift; cmd_fleet "$@" ;;
-    ship)       shift; cmd_ship "$@" ;;
-    ship-self)  shift; cmd_ship_self "$@" ;;
-    bootstrap)  shift; cmd_bootstrap "$@" ;;
+    ship)         shift; cmd_ship "$@" ;;
+    ship-self)    shift; cmd_ship_self "$@" ;;
+    sync-compose) shift; cmd_sync_compose "$@" ;;
+    bootstrap)    shift; cmd_bootstrap "$@" ;;
     help|-h|--help) usage ;;
     *) die "unknown subcommand '$1'; try 'adam help'" ;;
 esac

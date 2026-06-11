@@ -23,10 +23,8 @@
 #   - nano-research + nano-research-worker (Go) — autonomous research pipeline
 #   - figure-renderer — matplotlib sidecar invoked by nano-research
 #   - reranker — cross-encoder reranker for r2g
-#   - backend (Python) — R2R-based platform backend (graphrag, deep ingest)
-#   - worker-lo (Python) — graphrag + heavy arq jobs
 #   - evo-api (Go) — dashboard/aggregator API (the /api/v1/* surface)
-#   - skills-worker, reindex-worker, dispatch-worker, evo-worker — Temporal workers
+#   - adamaton-worker — unified Temporal worker (skills/reindex/dispatch/evo queues)
 #   - frontend (caddy:2-alpine) — SPA host + reverse proxy (Caddyfile)
 #   - deploy-agent (Go) — push-deploy receiver; see platform/deploy-agent
 
@@ -171,22 +169,34 @@ services:
       R2G_PORT: "7373"
       R2G_PPROF_PORT: "7374"
       R2G_LOG_FORMAT: json
+      # BGE_EMBED_URL points at the native llama-server bge-embed (port
+      # 8092). BGE_SIDECAR_URL kept as fallback during migration; will
+      # be removed once the Python sidecar's LOAD_EMBED_MODEL flips to
+      # false.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       LATEX2TEXT_BIN: /app/bin/latex2text
       OPENAI_API_BASE: ${OPENAI_API_BASE:-http://10.0.4.37:9080/v1}
       R2G_LLM_MODEL: ${R2G_LLM_MODEL:-qwen3.6-27b-nvfp8}
       R2G_DEFAULT_OWNER_ID: ${R2G_DEFAULT_OWNER_ID:-2acb499e-8428-543b-bd85-0d9098718220}
       R2G_RERANKER_URL: http://reranker:8091
+      # Document blobs now live in the Garage `dr-uploads` bucket (key scheme
+      # uploads/<uuid>), replacing the old dr_uploads volume mount. r2g
+      # fail-softs to 503 on upload/ingest if BLOBSTORE_ENDPOINT is unset.
+      BLOBSTORE_ENDPOINT: ${BLOBSTORE_ENDPOINT:-http://garage:3900}
+      BLOBSTORE_REGION: ${BLOBSTORE_REGION:-us-east-1}
+      BLOBSTORE_ACCESS_KEY: ${BLOBSTORE_ACCESS_KEY:-}
+      BLOBSTORE_SECRET_KEY: ${BLOBSTORE_SECRET_KEY:-}
     extra_hosts:
       - "workstation:${WORKSTATION_IP:-10.0.4.37}"
     depends_on:
       postgres:
         condition: service_healthy
+      garage:
+        condition: service_healthy
     ports:
       - "7373:7373"
       - "7374:7374"
-    volumes:
-      - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
   skills-rae:
@@ -197,6 +207,9 @@ services:
       SKILLS_RAE_PORT: "7376"
       SKILLS_RAE_PPROF_PORT: "7377"
       SKILLS_RAE_LOG_FORMAT: json
+      # BGE_EMBED_URL points at the native llama-server bge-embed.
+      # BGE_SIDECAR_URL kept as fallback until LOAD_EMBED_MODEL flips.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       SKILLS_RAE_EMBED_MODEL: bge-m3
     extra_hosts:
@@ -216,6 +229,9 @@ services:
     env_file: [.env, image-tags.env]
     environment:
       SKILLS_RAE_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # BGE_EMBED_URL points at the native llama-server bge-embed.
+      # BGE_SIDECAR_URL kept as fallback until LOAD_EMBED_MODEL flips.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
       BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
       SKILLS_RAE_EMBED_MODEL: bge-m3
       TEMPORAL_ADDRESS: temporal:7233
@@ -230,35 +246,53 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  skills-worker:
+  # Unified Temporal worker. One container, one image, N processes —
+  # s6-overlay supervises one adamaton-worker --queue=<q> per entry in
+  # WORKER_QUEUES. Pi5 hosts every queue today, so it pulls the 'full'
+  # variant (compiled with skills + reindex + dispatch + evo). A leaner
+  # 'light' variant exists for nodes that don't need evo.
+  #
+  # Replaces the four previous worker service blocks:
+  #   skills-worker, reindex-worker, dispatch-worker, evo-worker.
+  # The image-tags.env entry ADAMATON_WORKER_TAG pins variant+sha
+  # together (e.g. "full-sha-abc123"); the four legacy ADAMATON_*_TAG
+  # vars are kept in image-tags.env for one release cycle so
+  # `bin/adam deploy --rollback` can still spawn the standalone
+  # workers from a previous umbrella state.
+  adamaton-worker:
     hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-skills-worker:${ADAMATON_SKILLS_WORKER_TAG:-main}
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker-full:${ADAMATON_WORKER_TAG:-main}
     env_file: [.env, image-tags.env]
     environment:
+      WORKER_QUEUES: skills,reindex-ingest,reindex-extract,dispatch,evo
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
+      # Skills + dispatch + evo land on the evo Postgres (5432).
       EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # Reindex points at deepresearch (5433/deepresearch on pi5; the
+      # container reaches it via the compose-internal postgres name on
+      # port 5432 because pi5 runs both DBs in one postgres instance —
+      # the reindex worker's DSN expects 5433 only on hosts where the
+      # deepresearch DB lives elsewhere).
+      REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
+      # Embedding sidecar for the reindex-ingest ChunkEmbedPersist activity
+      # (embedding now runs on the worker node, not inside r2g). Prefer the
+      # native llama-server bge-embed (8092); BGE_SIDECAR_URL is the legacy
+      # Python-sidecar fallback during migration. Must match the model/dim
+      # r2g + skills-rae use or pgvector cosine breaks.
+      BGE_EMBED_URL: ${BGE_EMBED_URL:-http://10.0.4.37:8092}
+      BGE_SIDECAR_URL: ${BGE_SIDECAR_URL:-http://10.0.4.37:8089}
+      REINDEX_EMBED_MODEL: bge-m3
       SKILLS_R2R_BASE_URL: http://backend:7272
       SKILLS_R2R_ENABLED: "true"
-      LOG_LEVEL: info
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    restart: unless-stopped
-
-  reindex-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-reindex-worker:${ADAMATON_REINDEX_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      REINDEX_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       PLATFORM_BASE_URL: http://backend:7272
-      LOG_LEVEL: info
       R2G_URL: http://r2g:7373
+      DEEPRESEARCH_URL: http://backend:7272
+      # Pi only registers KernelEvaluatorActivities; the workflow
+      # dispatches kernel evals to blackwell's "evo-kernel" queue.
+      EVO_KERNEL_REMOTE_HOST: ""
+      LOG_LEVEL: info
     depends_on:
       postgres:
         condition: service_healthy
@@ -360,19 +394,14 @@ services:
     restart: unless-stopped
 
   # ---- platform sub-repo --------------------------------------------------
-  # The Python R2R `backend` service and its `worker-lo` arq sibling were
-  # removed from this compose on 2026-05-17. The platform/backend
-  # subdirectory disappeared from the platform sub-repo as part of the Go
-  # cutover (memory: ldr_deploy_state notes the R2R backend has been
-  # vestigial since the Adamaton rename on 2026-05-16). The compose kept
-  # referencing the dead image until `bin/adam deploy pi5` started failing
-  # on its missing manifest; removing both services unblocks deploys.
-  #
-  # Downstream `SKILLS_R2R_BASE_URL` / `PLATFORM_BASE_URL` /
-  # `DEEPRESEARCH_URL` env vars still point at `http://backend:7272` —
-  # left intentionally as DEAD pointers because the consuming services
-  # already tolerate the target being absent (they've run without it
-  # since the rename). Removing them is a separate cleanup PR.
+  # NOTE: services `backend` (Python R2R) + `worker-lo` (its arq sidecar) were
+  # removed on 2026-05-18 — `platform/backend/` is retired per docs/WHERE_DID_IT_GO.md
+  # ("functionality long since reimplemented in r2g + plugin-host") and the
+  # adamaton-platform-backend image was no longer built. Worker-side env vars
+  # still pointing at `http://backend:7272` (SKILLS_R2R_BASE_URL,
+  # PLATFORM_BASE_URL, the adamaton-worker DEEPRESEARCH_URL) are dead
+  # references; cleaning those up belongs with the worker-consolidation
+  # follow-up, not this change.
 
   plugin-host:
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-plugin-host:${ADAMATON_PLUGIN_HOST_TAG:-main}
@@ -382,10 +411,19 @@ services:
       PH_PORT: "7375"
       PH_MANIFEST_DIR: /etc/deepresearch/plugins
       PH_SOCKET_DIR: /run/dr-plugins
-      PH_DR_UPLOADS_DIR: /var/lib/dr-uploads
+      # Ephemeral container-local staging (writable layer, not the old
+      # dr_uploads volume). Plugins pull their inputs from Garage via the
+      # BLOBSTORE_* config and stage them here transiently.
+      PH_STAGE_DIR: /run/ph-stage
+      BLOBSTORE_ENDPOINT: ${BLOBSTORE_ENDPOINT:-http://garage:3900}
+      BLOBSTORE_REGION: ${BLOBSTORE_REGION:-us-east-1}
+      BLOBSTORE_ACCESS_KEY: ${BLOBSTORE_ACCESS_KEY:-}
+      BLOBSTORE_SECRET_KEY: ${BLOBSTORE_SECRET_KEY:-}
       PH_LOG_FORMAT: json
     depends_on:
       postgres:
+        condition: service_healthy
+      garage:
         condition: service_healthy
     expose:
       - "7375"
@@ -397,24 +435,10 @@ services:
       # ~/Adamaton-deploy/platform-plugins pointing at the source dir,
       # so plugin code can be swapped without rebuilding the image.
       - ./platform-plugins:/opt/dr-plugins:ro
-      - dr_uploads:/var/lib/dr-uploads:rw
     restart: unless-stopped
 
-  dispatch-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-dispatch-worker:${ADAMATON_DISPATCH_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
-      LOG_LEVEL: info
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    restart: unless-stopped
+  # dispatch-worker rolled into adamaton-worker above (queue=dispatch).
+  # Block removed; the queue is hosted by the unified worker container.
 
   evo-api:
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-api:${ADAMATON_EVO_API_TAG:-main}
@@ -426,7 +450,10 @@ services:
       API_BIND_ADDRESS: 0.0.0.0
       API_TOKEN: ${EVO_API_TOKEN}
       PORT: "9123"
-      DEEPRESEARCH_URL: http://backend:7272
+      # Probed by /api/v1/system/status:checkDeepResearch. Points at r2g
+      # (the Go replacement for the retired Python R2R backend per
+      # docs/WHERE_DID_IT_GO.md). Path is /health (set in apiserver code).
+      DEEPRESEARCH_URL: http://r2g:7373
       CCSAVER_DB: /data/ccsaver/data.db
       DASHBOARD_BASE_PATH: /evo-api
       # Workflow-node catalog is baked into the image at
@@ -447,12 +474,20 @@ services:
       # via the compose service name.
       ADAMATON_DEPLOY_AGENTS: ${ADAMATON_DEPLOY_AGENTS:-pi5=http://deploy-agent:9128,pi5-speaker=http://10.0.4.20:9128,workstation=http://10.0.4.37:9128,blackwell=http://10.0.4.37:9128}
       DEPLOY_AGENT_TOKEN: ${DEPLOY_AGENT_TOKEN}
+      # Fleet-health topology — apiserver loads at boot. Env override
+      # so operators can repoint without rebuilding the image.
+      HEALTH_TOPOLOGY_PATH: /etc/adamaton/health-topology.yml
+      # HEALTH_LOCAL_HOST tells the aggregator which host it's running
+      # on, used to decide which instances to actively probe vs which
+      # to trust the peer deploy-agent's docker compose ps view of.
+      HEALTH_LOCAL_HOST: pi5
       # Persistent-terminal backend for the Projects feature. tmux keeps
       # sessions alive across reload/restart; set to "none" to disable the
       # terminal endpoints entirely. The evo-api image ships tmux + bash.
       PTY_BACKEND: ${PTY_BACKEND:-tmux}
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
+      - ./health-topology.yml:/etc/adamaton/health-topology.yml:ro
       # Projects feature: registered project folders are stored as absolute
       # host paths; the terminal feature runs `tmux -c <path>` and the
       # file-tree reads from them, so they must be visible in the container
@@ -473,55 +508,55 @@ services:
       - "9123"
     restart: unless-stopped
 
-  # ---- evolve sub-repo ----------------------------------------------------
-  evo-worker:
-    hostname: pi
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
-    env_file: [.env, image-tags.env]
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_NAMESPACE: default
-      POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
-      EVO_TASK_QUEUE: evo
-      DEEPRESEARCH_URL: http://backend:7272
-      LOG_LEVEL: info
-      # KernelBench evals dispatch to blackwell via ssh per
-      # `evolve: dual-target kernel eval via RemoteHost ssh` (86e6208).
-      # Leave empty on the Pi so the worker only handles the cheap activities;
-      # the blackwell stack runs another evo-worker with this populated.
-      EVO_KERNEL_REMOTE_HOST: ""
-    depends_on:
-      postgres:
-        condition: service_healthy
-      temporal:
-        condition: service_started
-    restart: unless-stopped
+  # ---- evolve sub-repo (rolled into adamaton-worker above as queue=evo) ----
+  # The standalone evo-worker block moved into the unified adamaton-worker
+  # service. KernelBench evals still dispatch to blackwell's "evo-kernel"
+  # queue (see deploy/blackwell/docker-compose.yml).
 
-  # ---- evolve/dataset-manager: blob storage + Temporal worker ------------
-  # Object storage for dataset artifacts (parquet/jsonl shards). MinIO is
-  # S3-compatible; dataset-worker speaks to it over the docker network via
-  # http://minio:9000. Console is on 9001 (poke at it for debugging).
-  # Root credentials seed the underlying admin user; production deployments
-  # then create a least-privilege access key for the dataset-worker and
-  # store it in credentialstore (see DATASET_S3_ACCESS_NAME below). For
-  # the workstation-first-deploy path the same root creds are reused —
-  # acceptable for a single-tenant LAN-only bucket.
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  # ---- Garage: the storage node ------------------------------------------
+  # S3-compatible object store; the single thing every blob consumer talks
+  # to. Holds dataset artifacts (bucket `datasets`, dataset-worker) AND
+  # document blobs (bucket `dr-uploads`, r2g + plugin-host via
+  # core/blobstore). This replaced MinIO on 2026-05-24 and is what let us
+  # delete the NFS mounts — see deploy/pi5/GARAGE_MIGRATION.md for the
+  # one-time bootstrap (layout assign/apply, bucket create, key gen) and
+  # the MinIO→Garage data copy.
+  #
+  # Unlike MinIO, Garage has no static root credentials: after first boot
+  # you assign a layout and `garage key create` a least-privilege key, then
+  # put its ID/secret into .env as BLOBSTORE_ACCESS_KEY/BLOBSTORE_SECRET_KEY.
+  # rpc/admin secrets come from GARAGE_* env (the config file carries none).
+  garage:
+    image: dxflrs/garage:v1.0.1
+    env_file: [.env]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set GARAGE_RPC_SECRET in .env (openssl rand -hex 32)}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:-}
     volumes:
-      - minio_data:/data
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    expose:
+      - "3900"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # Published so the operator can run the MinIO→Garage data copy and the
+      # bootstrap CLI from the host. Safe to drop to bare `expose` once the
+      # migration is done.
+      - "3900:3900"
+      - "3903:3903"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      # The dxflrs/garage image is distroless — no shell, no wget/curl — so the
+      # healthcheck must be exec-form and use the only binary present, /garage.
+      # `garage status` connects over RPC and exits 0 once the node is up; it is
+      # the liveness signal `dataset-worker`'s depends_on gates on. (The :3903
+      # /health endpoint would be a richer "layout applied" check but there is
+      # no in-image HTTP client to call it with.)
+      test: ["CMD", "/garage", "status"]
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   dataset-worker:
@@ -533,16 +568,18 @@ services:
       TEMPORAL_NAMESPACE: default
       EVO_POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       DATASET_TASK_QUEUE: dataset-mgr
-      DATASET_S3_ENDPOINT: http://minio:9000
+      # Repointed from http://minio:9000 to Garage. dataset-manager's S3
+      # client is plain path-style S3, so no code change was needed.
+      DATASET_S3_ENDPOINT: http://garage:3900
       DATASET_S3_BUCKET: datasets
       DATASET_S3_REGION: us-east-1
-      # Bootstrap: pass MinIO root creds through to the worker directly.
-      # The first-class lookup path is credentialstore rows under
-      # type=s3AccessKey/s3SecretKey (names DATASET_S3_ACCESS_NAME /
-      # DATASET_S3_SECRET_NAME), but the worker honours env first for
-      # bootstrap convenience.
-      DATASET_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      DATASET_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # The Garage-generated least-privilege key (see GARAGE_MIGRATION.md).
+      # Shared with r2g/plugin-host under the BLOBSTORE_* names; the
+      # DATASET_S3_* aliases default to them so one key configures all
+      # blob consumers. credentialstore lookup (DATASET_S3_ACCESS_NAME /
+      # DATASET_S3_SECRET_NAME) still wins over env when present.
+      DATASET_S3_ACCESS_KEY: ${DATASET_S3_ACCESS_KEY:-${BLOBSTORE_ACCESS_KEY:-}}
+      DATASET_S3_SECRET_KEY: ${DATASET_S3_SECRET_KEY:-${BLOBSTORE_SECRET_KEY:-}}
       # HF token is optional — empty is fine for public datasets.
       HF_TOKEN: ${HF_TOKEN:-}
       LOG_LEVEL: info
@@ -551,9 +588,157 @@ services:
         condition: service_healthy
       temporal:
         condition: service_started
-      minio:
+      garage:
         condition: service_healthy
     restart: unless-stopped
+
+  # ---- v1.0 / v1.1 on-chain observability daemons -------------------------
+  # audit-monitor indexes the Adamaton v1.0 Audit contract on Sepolia
+  # mainnet-shadow (chain 11155111). Live WS subscription to OutcomePosted,
+  # OutcomeChallenged, OutcomeFinalizedChallenged. Exposes /health,
+  # /outcomes, /metrics on :9275. The frontend Network section talks to
+  # this through Caddy's /network-api/audit/* proxy block.
+  #
+  # Sepolia RPC notes:
+  #   - publicnode WS exits handle eth_subscribe; HTTP-only RPCs return
+  #     "notifications not supported" from the abigen Watch* helpers.
+  #   - --from-block is set to roughly the deploy window so the daemon's
+  #     in-memory snapshot rebuilds on every restart. Bump the value
+  #     when the contract is re-deployed.
+  audit-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-audit-monitor:${ADAMATON_AUDIT_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      # publicnode's public RPC enforces a strict 50k-block-range cap on
+      # eth_getLogs / eth_newFilter; abigen's Watch* helpers do a
+      # bounded initial filter at subscribe time that often blows
+      # through it. Tenderly's public gateway is less strict and
+      # speaks WS; swap back to a paid endpoint if rate limits bite.
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --audit-address=0xf3922cf86227301ac9a6b856fe6b577a09f96670
+      - --http-addr=0.0.0.0:9275
+      # publicnode's public eth_getLogs has a 50k-block-range limit;
+      # set --from-block close to the current Sepolia head so backfill
+      # stays inside one window. We never expect outcomes posted to a
+      # contract before its own deploy block anyway. v1.2 follow-up:
+      # chunked backfill inside audit-monitor itself so this number
+      # can move freely without operator tuning.
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    # No port mapping to the host — Caddy reaches it as
+    # http://audit-monitor:9275 over the compose default network.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9275/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # federation-monitor indexes the Adamaton v1.0 Federation contract on
+  # Sepolia (chain 11155111). Serves /network-api/federation/* via Caddy.
+  # Same WS RPC + tight --from-block window as audit-monitor.
+  federation-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-federation-monitor:${ADAMATON_FEDERATION_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --federation-address=0xe9b840d0454161742eb65b295af4d0aa3723026e
+      - --http-addr=0.0.0.0:9276
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9276/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ledger-monitor indexes the Adamaton v1.0 Ledger contract on Sepolia.
+  # Serves /network-api/ledger/* via Caddy.
+  ledger-monitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-ledger-monitor:${ADAMATON_LEDGER_MONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --ledger-address=0x6dced8becbc68b2454ba03756078f0242578737d
+      - --http-addr=0.0.0.0:9277
+      - --from-block=10825000
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9277/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # stealthmonitor indexes the Phase 8.2 StealthAnnouncer contract on
+  # Sepolia (chain 11155111). Stateless contract; we just observe
+  # Announce events and serve them at /network-api/stealth/* via Caddy.
+  # Workers pipe /announcements → adamaton-wallet stealth scan with
+  # their viewing key to detect incoming stealth payments.
+  stealthmonitor:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-stealthmonitor:${ADAMATON_STEALTHMONITOR_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --announcer-address=0x21948CE4758f7641f56a8C57f57fe0532011a1A2
+      - --http-addr=0.0.0.0:9279
+      - --from-block=10875193
+      - --health-poll-interval=30s
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9279/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # finalize-bot is the v1.1 permissionless finalize daemon — subscribes
+  # to Audit.OutcomePosted, waits for the dispute window, then signs
+  # finalize(jobID) transactions. The only signer-bearing daemon in
+  # this compose file.
+  #
+  # Key handling: the operator places a 0x-prefixed raw hex private
+  # key at ./secrets/finalize-bot.key on the host (600 perms, never
+  # committed). The compose stanza bind-mounts it into the container
+  # read-only at /run/secrets/finalize-bot.key; --key-file points the
+  # daemon at that path. Key never appears in env, image, or git.
+  #
+  # Idempotency: the daemon discovers pending outcomes from its
+  # FilterLogs backfill at --from-block; restarting it doesn't
+  # re-submit already-finalized outcomes (the contract reverts on
+  # double finalize, which the daemon already gracefully handles).
+  finalize-bot:
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-finalize-bot:${ADAMATON_FINALIZE_BOT_TAG:-main}
+    env_file: [.env, image-tags.env]
+    command:
+      - --rpc=wss://sepolia.gateway.tenderly.co
+      - --chain-id=11155111
+      - --audit-address=0xf3922cf86227301ac9a6b856fe6b577a09f96670
+      - --ledger-address=0x6dced8becbc68b2454ba03756078f0242578737d
+      - --federation-address=0xe9b840d0454161742eb65b295af4d0aa3723026e
+      - --registry-address=0xfa24dba9dbfe703133388e81af92b694b71e2d16
+      - --http-addr=0.0.0.0:9278
+      - --from-block=10825000
+      - --tick-interval=60s
+      - --health-poll-interval=30s
+      - --key-file=/run/secrets/finalize-bot.key
+    volumes:
+      - ./secrets/finalize-bot.key:/run/secrets/finalize-bot.key:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9278/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # ---- frontend sub-repo + edge proxy -------------------------------------
   frontend:
@@ -621,7 +806,20 @@ services:
 volumes:
   pg_data:
   redis_data:
-  minio_data:
+  # Garage storage node: metadata (sqlite) + object data, separate volumes
+  # so the data store can be sized/backed independently. minio_data was
+  # removed when MinIO was retired (2026-05-24); its `datasets` contents
+  # were copied into Garage per GARAGE_MIGRATION.md before deletion.
+  garage_meta:
+  garage_data:
+  # dr_uploads is the legacy document-staging volume. As of the Garage
+  # cutover (2026-05-24) NOTHING mounts it: r2g + plugin-host now read/write
+  # document blobs from Garage's dr-uploads bucket via BLOBSTORE_*. Its ~762
+  # MiB of persistent data (cag/, plugins/, wiki-seed/, zotero-sqlite/) was
+  # archived into Garage under matching prefixes (parity verified). The
+  # declaration is kept ONLY so the bytes survive as a rollback net; drop it
+  # with `docker volume rm deepresearch_dr_uploads` once the cutover is
+  # confirmed end-to-end.
   dr_uploads:
   reranker_hf_cache:
   caddy_data:

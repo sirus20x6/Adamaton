@@ -61,21 +61,35 @@ services:
       stack: 67108864
     restart: unless-stopped
 
-  evo-worker-kernel:
-    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-evo-worker:${ADAMATON_EVO_WORKER_TAG:-main}
-    hostname: blackwell
+  adamaton-worker:
+    # Unified Temporal worker (gpu variant — compiled with `evo` tag
+    # only; alpine + python3 for the KernelBench evaluator).
+    # s6-overlay runs one process: adamaton-worker --queue=evo.
+    # EVO_TASK_QUEUE overrides the queue name to the blackwell-specific
+    # "evo-kernel" so this worker only picks up KernelEvaluatorActivity
+    # work and never competes with pi5's general evo queue.
+    #
+    # Replaces evo-worker-kernel. The previous adamaton-evo-worker
+    # image keeps publishing for one release cycle so `bin/adam deploy
+    # --rollback` can re-spawn the standalone service block.
+    image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker-gpu:${ADAMATON_WORKER_TAG:-main}
+    # Kernel hostname follows the node-identity env so the container name
+    # matches the registered @suffix. Cosmetic after core's workerregistry
+    # reads WORKER_HOSTNAME directly; kept aligned to avoid confusion.
+    hostname: ${WORKER_HOSTNAME:-workstation}
     env_file: [.env, image-tags.env]
     environment:
+      WORKER_QUEUES: evo
+      EVO_TASK_QUEUE: ${EVO_KERNEL_TASK_QUEUE:-evo-kernel}
       TEMPORAL_ADDRESS: ${PI1_HOST:-10.0.4.30}:7233
       TEMPORAL_NAMESPACE: default
       POSTGRES_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST:-10.0.4.30}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
-      EVO_TASK_QUEUE: ${EVO_KERNEL_TASK_QUEUE:-evo-kernel}
       DEEPRESEARCH_URL: http://${PI1_HOST:-10.0.4.30}:7272
       LOG_LEVEL: info
       # Empty => kernel evals execute LOCALLY in this container's CUDA
       # runtime (see evolve/activities/evaluate.go RemoteHost field).
       EVO_KERNEL_REMOTE_HOST: ""
-      # vLLM endpoint for the evo-worker's own LLM-driven mutation prompts.
+      # vLLM endpoint for the worker's LLM-driven mutation prompts.
       OPENAI_API_BASE: http://vllm:9080/v1
       EVO_LLM_MODEL: ${VLLM_SERVED_MODEL:-qwen3.6-27b-nvfp8}
     runtime: nvidia
