@@ -30,7 +30,7 @@ CURRENT_AGENT="${ADAM_AGENT:-$(git config user.name 2>/dev/null || whoami)}"
 
 # Submodule names recognised as <scope>. "cross" is a special scope that
 # means "umbrella-level worktree containing all submodules".
-SUBMODULES=(core frontend knowledge deepresearch platform delegator evolve)
+SUBMODULES=(core frontend knowledge deepresearch platform delegator evolve loopvm)
 
 # ---- helpers -------------------------------------------------------------
 

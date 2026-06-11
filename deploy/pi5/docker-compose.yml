@@ -77,6 +77,56 @@ services:
       - "8888:8080"
     restart: unless-stopped
 
+  # ---- LDR (Local Deep Research, upstream Python) -------------------------
+  # Temporary service deployed for Phase A bring-up of the Go bridge → LDR
+  # path. The Go bridge speaks HTTP to this service over the compose network
+  # and authenticates via the header-auth middleware (see task A.0) keyed by
+  # LDR_API_KEY. Slated for removal in Phase B.9 once the Go reimplementation
+  # passes the parity gate. See deploy/pi5/LDR_BRINGUP.md.
+  #
+  # Upstream image is multi-arch (linux/arm64 included), so it works on the
+  # pi5 host without a local build. Switch to `build:` if a local fork is
+  # needed for the middleware patch and upstream hasn't accepted it.
+  ldr:
+    image: localdeepresearch/local-deep-research:latest
+    environment:
+      # Docker-required network bindings (per upstream docker-compose).
+      LDR_WEB_HOST: 0.0.0.0
+      LDR_WEB_PORT: "5000"
+      LDR_DATA_DIR: /data
+      # SearXNG meta-search backend — reuse the existing pi5 service.
+      LDR_SEARCH_ENGINE_WEB_SEARXNG_DEFAULT_PARAMS_INSTANCE_URL: http://searxng:8080
+      # Adamaton-specific: shared secret consumed by the header-auth
+      # middleware patched in task A.0. Upstream LDR does not read this
+      # variable; if the middleware is not yet present this is a no-op.
+      LDR_API_KEY: ${LDR_API_KEY}
+      # LLM provider — point at the workstation's OpenAI-compatible endpoint
+      # (vLLM) so LDR uses the same backend as r2g/nano-research instead of
+      # spinning up its own ollama. Override at deploy time if needed.
+      LDR_LLM_PROVIDER: ${LDR_LLM_PROVIDER:-openai_endpoint}
+      LDR_LLM_OPENAI_ENDPOINT_URL: ${LDR_LLM_OPENAI_ENDPOINT_URL:-http://10.0.4.37:9080/v1}
+      LDR_LLM_OPENAI_ENDPOINT_API_KEY: ${LDR_LLM_OPENAI_ENDPOINT_API_KEY:-}
+      LDR_LLM_MODEL: ${LDR_LLM_MODEL:-qwen3.6-27b-nvfp8}
+      # Lock public registration off — the bridge is the only consumer.
+      LDR_APP_ALLOW_REGISTRATIONS: "false"
+    extra_hosts:
+      - "workstation:${WORKSTATION_IP:-10.0.4.37}"
+    depends_on:
+      searxng:
+        condition: service_started
+    volumes:
+      - ldr_data:/data
+      - ldr_scripts:/scripts
+    # SQLCipher needs mlock() — match upstream's compose.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # Internal-only; Caddy reverse-proxies ldr.local → ldr:5000.
+    expose:
+      - "5000"
+    restart: unless-stopped
+
   temporal:
     image: temporalio/auto-setup:1.27
     environment:
@@ -306,6 +356,18 @@ services:
       NANO_RESEARCH_LOG_LEVEL: ${NANO_RESEARCH_LOG_LEVEL:-info}
       FIGURE_RENDERER_URL: http://figure-renderer:8090
       NANO_WORKER_LABEL: pi5
+      # R2G_URL composes TGS-RAG Channels 1↔2: when set, searchcore
+      # strategies (IterativeRefinement, IterDrag) call r2g alongside
+      # searxng, so Channel 1's vote-aware retrieval and Channel 2's
+      # orphan bridging share the same hit stream. Comment out for
+      # web-only behaviour (no Channel 1 contribution).
+      R2G_URL: http://r2g:7373
+      # LDR_BASE_URL + LDR_API_KEY power the Phase A DEEP_SEARCH bridge
+      # (ldrdeepsearch.go). Required when ResearchInput.UseDeepSearch=true.
+      # Channel 2 / searchcore strategies don't use these — they only
+      # matter for the LDR-Python path that's transient until B.9 parity.
+      LDR_BASE_URL: http://ldr:5000
+      LDR_API_KEY: ${LDR_API_KEY}
     extra_hosts:
       - "workstation:${WORKSTATION_IP:-10.0.4.37}"
     depends_on:
@@ -315,6 +377,13 @@ services:
         condition: service_started
     volumes:
       - nano_workspace:/var/lib/nano-research
+    # The Dockerfile's HEALTHCHECK probes http://localhost:7378/healthz,
+    # which is the nano-research HTTP server entrypoint. The worker
+    # variant has no HTTP listener — Temporal sees liveness via the
+    # worker's polling heartbeat, not an HTTP endpoint. Disable so the
+    # container doesn't perpetually report `(unhealthy)`.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   figure-renderer:
@@ -412,9 +481,20 @@ services:
       # on, used to decide which instances to actively probe vs which
       # to trust the peer deploy-agent's docker compose ps view of.
       HEALTH_LOCAL_HOST: pi5
+      # Persistent-terminal backend for the Projects feature. tmux keeps
+      # sessions alive across reload/restart; set to "none" to disable the
+      # terminal endpoints entirely. The evo-api image ships tmux + bash.
+      PTY_BACKEND: ${PTY_BACKEND:-tmux}
     volumes:
       - /srv/ccsaver:/data/ccsaver:ro
       - ./health-topology.yml:/etc/adamaton/health-topology.yml:ro
+      # Projects feature: registered project folders are stored as absolute
+      # host paths; the terminal feature runs `tmux -c <path>` and the
+      # file-tree reads from them, so they must be visible in the container
+      # at the SAME path. Point ADAM_PROJECTS_ROOT at the directory your
+      # registered repos live under. Defaults to a placeholder so the mount
+      # is harmless until an operator sets it (same path in and out).
+      - ${ADAM_PROJECTS_ROOT:-/srv/adam-projects}:${ADAM_PROJECTS_ROOT:-/srv/adam-projects}:rw
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/CLAUDE.md:/root/.claude/CLAUDE.md:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/claude/projects:/root/.claude/projects:ro
       - ${AGENT_MEMORY_DIR:-/home/sirus/agent-memory}/codex/memories:/root/.codex/memories:ro
@@ -681,6 +761,7 @@ services:
       - "443:443"
     depends_on:
       - evo-api
+      - ldr
       - nano-research
       - r2g
       - skills-rae
@@ -744,3 +825,5 @@ volumes:
   caddy_data:
   caddy_config:
   nano_workspace:
+  ldr_data:
+  ldr_scripts:

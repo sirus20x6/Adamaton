@@ -19,3 +19,6 @@
 [submodule "evolve"]
 	path = evolve
 	url = git@github.com:sirus20x6/adamaton-evolve.git
+[submodule "loopvm"]
+	path = loopvm
+	url = git@github.com:sirus20x6/adamaton-loopvm.git

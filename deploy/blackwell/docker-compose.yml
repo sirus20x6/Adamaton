@@ -134,10 +134,20 @@ services:
       # the cwd MUST be a host-side path, not a container-only path.
       DEPLOY_AGENT_COMPOSE_DIR: /home/sirus/Adamaton-deploy
       DEPLOY_AGENT_BIND: ":9128"
+      # Host-aware projects: this agent serves its host's filesystem + tmux
+      # for the dashboard's /project/* proxy (the pi5 apiserver proxies any
+      # project registered with host=workstation/blackwell here). tmux backs
+      # the persistent terminals.
+      PTY_BACKEND: ${PTY_BACKEND:-tmux}
     working_dir: /home/sirus/Adamaton-deploy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/sirus/Adamaton-deploy:/home/sirus/Adamaton-deploy
+      # Host-aware projects: registered project folders live under this root
+      # and are served (file-tree + terminals) at the SAME path in-container,
+      # since projects store absolute host paths. Anyone with dashboard access
+      # can then browse/edit/run terminals in repos under this dir.
+      - ${ADAM_PROJECTS_ROOT:-/thearray/git}:${ADAM_PROJECTS_ROOT:-/thearray/git}:rw
     ports:
       # LAN-direct. bin/adam ship uses http://<host>:9128 instead of going
       # through Caddy/HTTPS -- pi5-speaker has no Caddy edge, and the

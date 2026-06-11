@@ -80,7 +80,10 @@ git commit -am "manual: clear stale lock for <scope>/<task>"
 
 The hooks let you bypass with `--force` flags; use sparingly.
 
-## After your PR merges
+## After your PR merges — finish the job
+
+A merged PR is **not** a finished task. Until you bump the pin and deploy, the merged code is invisible
+to the umbrella and to everything that builds from it.
 
 ```bash
 bin/adam bump platform
@@ -91,3 +94,20 @@ git push           # update the pin remotely
 ```
 
 Other agents `bin/adam pull` to see the new pin.
+
+Then **deploy and verify** (see the Definition of done in `CLAUDE.md`):
+
+- **Local artifacts** built via `go.work` (e.g. `delegator-mcp`): the build resolves each module from its
+  **local submodule checkout**, not the umbrella pin — so `git -C <sub> checkout <merged-sha>` (or
+  `git submodule update`) **before** `go build`, or you ship stale code (this is how a `delegator-mcp`
+  rebuild once shipped without the merged kanban tools). After building, **verify the artifact actually
+  carries the change** (e.g. grep the binary for the new strings), install it to the launch path, and
+  **restart any long-running process still on the old binary** — a replaced binary shows as `…(deleted)`
+  in `/proc/<pid>/exe`. This step is required and standing-authorized; just do it.
+- **Hosts / fleet** (`bin/adam deploy <host>`, `bin/adam ship`): disruptive and outward-facing — confirm
+  before executing, then carry it through.
+
+Finally, `bin/adam release <scope>/<task>` removes the worktree and drops the lockfile.
+
+> **Definition of done:** committed → PR'd → merged → bumped → deployed → verified → released.
+> Stopping earlier is an incomplete task; if you must stop, say which steps remain.
