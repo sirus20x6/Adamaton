@@ -1136,11 +1136,26 @@ cmd_sync_compose() {
         echo "==> sync-compose: $topo_src -> $ssh:Adamaton-deploy/health-topology.yml"
         scp "$topo_src" "$ssh:Adamaton-deploy/health-topology.yml" || echo "    warning: topology scp failed (non-fatal)" >&2
     fi
+    # MANIFEST.yaml — the deploy-agent's allow-list (which services it will
+    # restart/scale/status). The agent reads it ONCE AT BOOT, so a change is
+    # inert until the agent is recreated. Without this scp the on-host
+    # allow-list silently drifts from the repo: a removed service stays
+    # allow-listed (fleet verify shows it absent) and an added one is rejected
+    # with "service not in allow-list".
+    local manifest_src="$ADAM_ROOT/deploy/$host/MANIFEST.yaml"
+    if [[ -f "$manifest_src" ]]; then
+        echo "==> sync-compose: $manifest_src -> $ssh:Adamaton-deploy/MANIFEST.yaml"
+        scp "$manifest_src" "$ssh:Adamaton-deploy/MANIFEST.yaml" || echo "    warning: MANIFEST scp failed (non-fatal)" >&2
+    fi
     echo
     echo "Compose synced. To apply env changes for a service:"
     echo "  ssh $ssh 'cd Adamaton-deploy && docker compose up -d --force-recreate --no-deps <service>'"
     echo "If the Caddyfile changed:"
     echo "  ssh $ssh 'cd Adamaton-deploy && docker compose restart frontend'"
+    echo "If MANIFEST.yaml changed (agent reads it at boot — restart to reload the allow-list):"
+    echo "  ssh $ssh 'cd Adamaton-deploy && docker compose up -d --force-recreate --no-deps deploy-agent'"
+    echo "Then confirm the fleet converged:"
+    echo "  bin/adam fleet verify $host"
 }
 
 cmd_bootstrap() {
