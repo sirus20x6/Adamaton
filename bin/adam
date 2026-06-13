@@ -63,6 +63,8 @@ Hooks + submodules:
 
 Fleet (multi-host rollouts):
   fleet status              show what image_tag each host's MANIFEST.yaml pins
+  fleet verify <host|all>   per-service red/green table (running? healthy?) via
+                            the deploy-agent; exits non-zero on any red
   fleet pull <host|all>     ssh + docker compose pull + up -d, per host's MANIFEST
   fleet promote <sha-or-tag>  bulk-update every host's MANIFEST to a new tag
 
@@ -578,10 +580,131 @@ cmd_fleet() {
     local sub="${1:-status}"; shift || true
     case "$sub" in
         status)  fleet_status "$@" ;;
+        verify)  fleet_verify "$@" ;;
         pull)    fleet_pull "$@" ;;
         promote) fleet_promote "$@" ;;
-        *) die "unknown fleet subcommand '$sub' (valid: status | pull | promote)" ;;
+        *) die "unknown fleet subcommand '$sub' (valid: status | verify | pull | promote)" ;;
     esac
+}
+
+# fleet_verify <host|all>: post-deploy smoke test. For each service in the
+# host's deploy-agent MANIFEST, ask the agent for its `docker compose ps`
+# state + health + running image, and print a red/green table. Exits non-zero
+# if any service is not running/healthy (or the agent is unreachable) so it
+# can gate a ship postflight or a scheduled alert. Pure HTTP via the
+# deploy-agent — no ssh — so it works uniformly on pi5 and the localhost-only
+# blackwell agent. Card-ec3d258a.
+fleet_verify() {
+    local host="${1:-}"
+    [[ -z "$host" ]] && die "fleet verify: usage: adam fleet verify <host> (or 'all')"
+    load_ship_env
+    if [[ "$host" == "all" ]]; then
+        local rc=0
+        for h in pi5 pi5-speaker blackwell; do fleet_verify_one "$h" || rc=1; done
+        return $rc
+    fi
+    fleet_verify_one "$host"
+}
+
+fleet_verify_one() {
+    local host="$1"
+    local url auth
+    url="$(host_deploy_url "$host")"
+    auth="Authorization: Bearer $DEPLOY_AGENT_TOKEN"
+
+    # Colors only on a TTY (a cron/CI run gets plain text it can grep).
+    local C_R="" C_G="" C_Y="" C_0=""
+    if [[ -t 1 ]]; then C_R=$'\033[31m'; C_G=$'\033[32m'; C_Y=$'\033[33m'; C_0=$'\033[0m'; fi
+
+    echo "==> fleet verify: $host ($url)"
+
+    # Agent liveness first — distinguishes "agent down" from "services down".
+    if ! curl -fsS --max-time 5 "$url/health" >/dev/null 2>&1; then
+        printf '  %sFAIL%s deploy-agent unreachable at %s\n' "$C_R" "$C_0" "$url"
+        return 1
+    fi
+
+    local svcs
+    if ! svcs="$(curl -fsS --max-time 10 -H "$auth" "$url/services" 2>/dev/null | jq -r '.services[]?' 2>/dev/null)"; then
+        printf '  %sFAIL%s could not list services from %s/services (auth/agent error)\n' "$C_R" "$C_0" "$url"
+        return 1
+    fi
+    if [[ -z "$svcs" ]]; then
+        echo "  (no services in this host's MANIFEST)"
+        return 0
+    fi
+
+    # "Expected running" = topology.yml roles with min_healthy>=1 and not
+    # optional. This is what gates the exit code: a service the topology says
+    # must be up that is absent/unhealthy is RED; a service that's down but NOT
+    # in this set (cold workers, profile-gated trainers, retired-but-still-
+    # allow-listed entries, optional services like bge-embed/vllm) is a WARN,
+    # not a failure — so a scheduled verify doesn't cry wolf on intended-cold.
+    # The deploy-agent's `compose ps` (no -a) can't itself tell cold from
+    # crashed; topology membership is the opt-in "this must be up" signal.
+    local expected=""
+    local topo="$DEPLOY_DIR/health/topology.yml"
+    if [[ -f "$topo" ]]; then
+        expected="$(python3 -c "
+import yaml,sys
+d=yaml.safe_load(open(sys.argv[1])) or {}
+for n,r in (d.get('roles') or {}).items():
+    r=r or {}
+    if r.get('min_healthy',0)>=1 and not r.get('optional'): print(n)
+" "$topo" 2>/dev/null || true)"
+    fi
+
+    printf '      %-26s %-9s %-9s %s\n' SERVICE STATE HEALTH IMAGE-TAG
+    local any_red=0 warns=0 svc raw first state health image tag mark exp
+    while IFS= read -r svc; do
+        [[ -z "$svc" ]] && continue
+        raw="$(curl -fsS --max-time 25 -H "$auth" "$url/status?service=$svc" 2>/dev/null || true)"
+        # Tolerate the shapes `docker compose ps --format json` emits (a JSON
+        # array, NDJSON, a single object) plus the agent's {error,output}
+        # body; take the first container object.
+        first="$(printf '%s' "$raw" | jq -c 'if type=="array" then .[] else . end' 2>/dev/null | head -n1)"
+        if [[ -z "$first" ]]; then
+            state="absent"; health=""; image=""
+        elif printf '%s' "$first" | jq -e 'has("error")' >/dev/null 2>&1; then
+            state="error"; health="$(printf '%s' "$first" | jq -r '.error' | head -c 40)"; image=""
+        else
+            state="$(printf '%s' "$first" | jq -r '.State // "?"')"
+            health="$(printf '%s' "$first" | jq -r '.Health // ""')"
+            image="$(printf '%s' "$first" | jq -r '.Image // ""')"
+        fi
+        tag="${image##*:}"; [[ "$tag" == "$image" ]] && tag="${image:+<no-tag>}"
+        exp=0; grep -qxF "$svc" <<<"$expected" && exp=1
+
+        if [[ "$state" == "running" ]]; then
+            if [[ "$health" == "healthy" || -z "$health" ]]; then
+                mark="${C_G}ok  ${C_0}"
+            elif [[ "$health" == "starting" ]]; then
+                mark="${C_Y}warn${C_0}"; warns=$((warns+1))
+            else                                   # unhealthy / anything bad
+                mark="${C_R}FAIL${C_0}"; any_red=1
+            fi
+        else                                       # not running
+            if (( exp )); then
+                mark="${C_R}FAIL${C_0}"; any_red=1 # topology says it must be up
+            else
+                mark="${C_Y}cold${C_0}"; warns=$((warns+1))
+            fi
+        fi
+        printf '  %s %-26s %-9s %-9s %s\n' "$mark" "$svc" "$state" "${health:-—}" "${tag:-—}"
+    done <<< "$svcs"
+
+    if (( any_red )); then
+        printf '  %s→ RED: an expected-running service on %s is not running/healthy%s' "$C_R" "$host" "$C_0"
+        (( warns )) && printf ' (%d warn/cold)' "$warns"
+        printf '\n'
+        return 1
+    fi
+    if (( warns )); then
+        printf '  %s→ green on %s (%d warn/cold — down but not topology-required)%s\n' "$C_G" "$host" "$warns" "$C_0"
+    else
+        printf '  %s→ all green on %s%s\n' "$C_G" "$host" "$C_0"
+    fi
+    return 0
 }
 
 fleet_status() {
