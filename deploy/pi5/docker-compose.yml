@@ -357,6 +357,11 @@ services:
     # Shares the adamaton-nano-research image with the nano-research service
     # above; entrypoint differs. The tag var stays in sync because both
     # reference ADAMATON_NANO_RESEARCH_TAG.
+    # hostname: pi — REQUIRED, like every other pi5 worker. core/workerregistry
+    # uses os.Hostname() as the rack-identity suffix; without this the worker
+    # registers as nano-research-worker@<container-id>, which the Nodes page
+    # classifies as a separate (arm64/4GB) Raspberry Pi rack — a phantom node.
+    hostname: pi
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-nano-research:${ADAMATON_NANO_RESEARCH_TAG:-main}
     env_file: [.env, image-tags.env]
     entrypoint: ["/usr/local/bin/nano-research-worker"]
