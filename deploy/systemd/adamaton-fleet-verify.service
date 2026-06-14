@@ -1,0 +1,21 @@
+# deploy/systemd/adamaton-fleet-verify.service
+#
+# One-shot: run `bin/adam fleet verify all --notify` from the workstation
+# (the box that holds ship.env + can reach every deploy-agent). On any
+# topology-required service going red, it POSTs an alert to
+# ADAMATON_ALERT_WEBHOOK (ntfy topic or generic webhook). Paired with the
+# .timer below. Install as a USER unit:
+#   cp deploy/systemd/adamaton-fleet-verify.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now adamaton-fleet-verify.timer
+# Requires ADAMATON_ALERT_WEBHOOK set in ~/.adamaton/ship.env (your ntfy URL).
+[Unit]
+Description=Adamaton fleet verify (red/green smoke test) + alert on red
+After=network-online.target
+
+[Service]
+Type=oneshot
+# ship.env carries DEPLOY_AGENT_TOKEN, WORKSTATION_IP, and ADAMATON_ALERT_WEBHOOK.
+EnvironmentFile=%h/.adamaton/ship.env
+ExecStart=/thearray/git/Adamaton/bin/adam fleet verify all --notify
+# Non-zero exit (a red fleet) is expected signal, not a unit failure.
+SuccessExitStatus=0 1
