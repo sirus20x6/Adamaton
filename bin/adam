@@ -965,7 +965,17 @@ ship_frontend() {
     # The frontend tracks no committed lockfile, so resolve from package.json.
     # pnpm v11's verify-deps hook breaks `pnpm <script>` invocations, so we
     # call the vite binary directly; plain `vite build` IS the production build.
-    (cd "$fe" && CI=true pnpm install --no-frozen-lockfile) || die "pnpm install failed"
+    # pnpm v10+ exits non-zero on the ERR_PNPM_IGNORED_BUILDS advisory when a
+    # dependency ships an un-approved build script (e.g. @swc/core) — even
+    # though the install itself succeeded and this frontend builds fine
+    # without those scripts (vite/swc/esbuild ship prebuilt binaries). Don't
+    # let that advisory abort the ship: install best-effort, then assert the
+    # install actually produced the vite binary so a REAL failure still dies,
+    # and let `vite build` be the true gate.
+    (cd "$fe" && CI=true pnpm install --no-frozen-lockfile) \
+        || echo "    note: pnpm install exited non-zero (likely the ignored-build-scripts advisory); continuing — vite build is the gate"
+    [[ -x "$fe/node_modules/.bin/vite" ]] \
+        || die "pnpm install did not produce node_modules/.bin/vite (genuine install failure)"
     (cd "$fe" && CI=true ./node_modules/.bin/vite build) || die "vite build failed"
 
     mkdir -p "$dist"
