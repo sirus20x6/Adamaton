@@ -1,0 +1,16 @@
+# deploy/systemd/adamaton-fleet-verify.timer
+#
+# Runs the fleet-verify smoke test every 10 minutes (a few minutes after
+# boot). The interval bounds re-alert frequency for a persistent outage
+# (fleet_notify re-fires each red run; transition de-dup is a follow-up).
+[Unit]
+Description=Run Adamaton fleet verify every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+RandomizedDelaySec=45
+Persistent=true
+
+[Install]
+WantedBy=timers.target
