@@ -80,6 +80,10 @@ Push-deploy (workstation registry -> deploy-agent on host):
                             then POST /deploy/restart on <host>.lan for each.
                             Reads token + registry IP from ~/.adamaton/ship.env.
                             Refuses to ship if the sub-repo is git-dirty.
+  rollback <host> <svc> [<tag>]
+                            redeploy <svc> to a PRIOR registry tag (no rebuild);
+                            omit <tag> to list available tags. Verifies via
+                            fleet verify. The recovery half of deploy safety.
   ship-self <host>          build + push deploy-agent and restart it on <host>
                             via ssh (the agent cannot self-restart safely).
   sync-compose <host>       scp deploy/<host>/docker-compose.yml (+ .env.example)
@@ -913,12 +917,15 @@ ship_frontend() {
     [[ -f "$fe/package.json" ]] || die "frontend submodule is not checked out"
 
     echo "==> ship: frontend (vite bundle) -> $host"
-    # pnpm v11's verify-deps hook breaks `pnpm <script>` invocations, so call
-    # the vite binary directly; plain `vite build` IS the production build.
-    if [[ ! -d "$fe/node_modules" ]]; then
-        (cd "$fe" && pnpm install --silent) || die "pnpm install failed"
-    fi
-    (cd "$fe" && ./node_modules/.bin/vite build) || die "vite build failed"
+    # ALWAYS install (idempotent + fast when up-to-date). Skipping it when
+    # node_modules merely exists builds against STALE modules after a
+    # dependency change — e.g. a dependabot bump or a newly-declared dep
+    # (@xterm/*) won't be present, and `vite build` fails to resolve it.
+    # The frontend tracks no committed lockfile, so resolve from package.json.
+    # pnpm v11's verify-deps hook breaks `pnpm <script>` invocations, so we
+    # call the vite binary directly; plain `vite build` IS the production build.
+    (cd "$fe" && CI=true pnpm install --no-frozen-lockfile) || die "pnpm install failed"
+    (cd "$fe" && CI=true ./node_modules/.bin/vite build) || die "vite build failed"
 
     mkdir -p "$dist"
     rsync -a --delete "$fe/dist/" "$dist/" || die "local frontend-dist sync failed"
@@ -1024,6 +1031,48 @@ cmd_ship() {
             echo "adam: warning: $svc status did not reflect $tag within 60s on $host (deploy was accepted; check 'curl $status_url' manually)" >&2
         fi
     done
+}
+
+# cmd_rollback <host> <service> [<tag>]: redeploy a service to a PRIOR
+# known-good image tag WITHOUT rebuilding — the tag must already exist in the
+# workstation registry. POSTs the deploy-agent /restart, which (since the
+# env-shadow + tag-verify fixes) pulls + force-recreates and confirms the
+# running tag == requested before returning, then runs `fleet verify` as a
+# second check. Omit <tag> to list the registry tags you can roll back to.
+# The recovery half of the deploy-safety loop (card-529dbe2b).
+cmd_rollback() {
+    [[ $# -ge 2 ]] || die "rollback: usage: adam rollback <host> <service> [<tag>]  (omit <tag> to list available tags)"
+    load_ship_env
+    local host="$1" svc="$2" tag="${3:-}"
+
+    # Resolve the registry image name + the compose service the agent restarts.
+    local image service_name spec sub_repo dockerfile context img target go_tags compose_svc
+    if spec="$(ship_service_spec "$svc")"; then
+        IFS='|' read -r sub_repo dockerfile context img target go_tags compose_svc <<<"$spec"
+        image="$img"; service_name="${compose_svc:-$svc}"
+    else
+        image="adamaton-$svc"; service_name="$svc"
+    fi
+
+    # No tag → list known-good tags from the registry and exit.
+    if [[ -z "$tag" ]]; then
+        echo "Recent registry tags for $image (roll back to one of these):"
+        curl -fsS --max-time 5 "http://${WORKSTATION_IP}:5000/v2/${image}/tags/list" 2>/dev/null \
+            | jq -r '.tags[]?' 2>/dev/null | grep '^sha-' | sort | tail -15 | sed 's/^/  /' \
+            || echo "  (registry unreachable)"
+        die "rollback: re-run with a tag, e.g. adam rollback $host $svc <tag>"
+    fi
+
+    echo "==> rollback: $service_name on $host -> $tag (no rebuild; tag must be in the registry)"
+    local restart_url resp
+    restart_url="$(host_deploy_url "$host")/restart?service=${service_name}&tag=${tag}"
+    echo "    POST $restart_url"
+    if ! resp="$(curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_AGENT_TOKEN" "$restart_url" 2>&1)"; then
+        die "deploy-agent rejected rollback of $service_name to $tag on $host: $resp"
+    fi
+    echo "    agent converged + verified $service_name on $tag"
+    echo "==> post-rollback fleet verify ($host):"
+    fleet_verify_one "$host" || true
 }
 
 cmd_ship_self() {
@@ -1367,6 +1416,7 @@ case "$1" in
     rescue)     shift; cmd_rescue "$@" ;;
     fleet)      shift; cmd_fleet "$@" ;;
     ship)         shift; cmd_ship "$@" ;;
+    rollback)     shift; cmd_rollback "$@" ;;
     ship-self)    shift; cmd_ship_self "$@" ;;
     sync-compose) shift; cmd_sync_compose "$@" ;;
     bootstrap)    shift; cmd_bootstrap "$@" ;;
