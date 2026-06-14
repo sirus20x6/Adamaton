@@ -30,6 +30,13 @@ services:
     # Mirrors deploy/pi5/docker-compose.yml which pins hostname: pi.
     hostname: pi5-speaker
     entrypoint: ["/usr/local/bin/nano-research-worker"]
+    # nano-research-worker shares the nano-research IMAGE, which bakes a
+    # HEALTHCHECK that wgets the server's :7378/healthz. The worker is a
+    # Temporal worker and serves no HTTP, so the inherited check is always
+    # unhealthy (wget: connection refused) — disable it here. Liveness is
+    # the worker's Temporal heartbeat (visible on /nodes), not an HTTP probe.
+    healthcheck:
+      disable: true
     environment:
       NANO_RESEARCH_DSN: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${PI1_HOST}:5432/${POSTGRES_DB:-postgres}?sslmode=disable
       QWEN_BASE_URL: ${QWEN_BASE_URL:-http://10.0.4.37:9080/v1}
