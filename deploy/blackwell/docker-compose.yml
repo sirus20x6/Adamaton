@@ -121,6 +121,36 @@ services:
       - ${DISTILL_OUTPUT_DIR:-/srv/checkpoints/distill}:/srv/checkpoints/distill
     restart: "no"
 
+  # ---- ntfy: self-hosted push notifications (fleet-verify alerts) ---------
+  # Lives HERE (workstation/blackwell) on purpose: the scheduled
+  # `bin/adam fleet verify --notify` timer also runs on the workstation, so an
+  # alert about pi5 going down is still deliverable when pi5 is down — the
+  # notifier never shares a failure domain with what it monitors. Open on the
+  # LAN (the topic name is the channel); the phone subscribes via the ntfy app
+  # at http://10.0.4.37:9134/<topic> (or over tailscale when off-LAN). Set
+  # ADAMATON_ALERT_WEBHOOK=http://127.0.0.1:9134/<topic> in ~/.adamaton/ship.env.
+  ntfy:
+    image: binwiederhier/ntfy:v2.11.0
+    command: ["serve"]
+    environment:
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-http://10.0.4.37:9134}
+      NTFY_LISTEN_HTTP: ":9134"
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_CACHE_DURATION: "72h"
+      NTFY_ATTACHMENT_CACHE_DIR: /var/cache/ntfy/attachments
+      NTFY_BEHIND_PROXY: "false"
+    ports:
+      - "9134:9134"
+    volumes:
+      - ntfy_cache:/var/cache/ntfy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9134/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   # ---- push-deploy receiver -----------------------------------------------
   deploy-agent:
     # Bumped via `bin/adam ship-self blackwell` (ssh-based; the agent can't
@@ -158,3 +188,4 @@ services:
 
 volumes:
   kernelbench_scratch:
+  ntfy_cache:
