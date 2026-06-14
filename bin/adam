@@ -63,8 +63,12 @@ Hooks + submodules:
 
 Fleet (multi-host rollouts):
   fleet status              show what image_tag each host's MANIFEST.yaml pins
-  fleet verify <host|all>   per-service red/green table (running? healthy?) via
-                            the deploy-agent; exits non-zero on any red
+  fleet verify <host|all> [--notify]
+                            per-service red/green table (running? healthy?) via
+                            the deploy-agent; exits non-zero on any red.
+                            --notify POSTs an alert to ADAMATON_ALERT_WEBHOOK
+                            (ntfy/webhook, set in ship.env) when red — see the
+                            adamaton-fleet-verify.timer in deploy/systemd/.
   fleet pull <host|all>     ssh + docker compose pull + up -d, per host's MANIFEST
   fleet promote <sha-or-tag>  bulk-update every host's MANIFEST to a new tag
 
@@ -599,15 +603,52 @@ cmd_fleet() {
 # deploy-agent — no ssh — so it works uniformly on pi5 and the localhost-only
 # blackwell agent. Card-ec3d258a.
 fleet_verify() {
-    local host="${1:-}"
-    [[ -z "$host" ]] && die "fleet verify: usage: adam fleet verify <host> (or 'all')"
+    local host="" notify=0 a
+    for a in "$@"; do
+        case "$a" in
+            --notify) notify=1 ;;
+            -*) die "fleet verify: unknown flag '$a'" ;;
+            *) host="$a" ;;
+        esac
+    done
+    [[ -z "$host" ]] && die "fleet verify: usage: adam fleet verify <host|all> [--notify]"
     load_ship_env
-    if [[ "$host" == "all" ]]; then
-        local rc=0
-        for h in pi5 pi5-speaker blackwell; do fleet_verify_one "$h" || rc=1; done
-        return $rc
+    local rc=0 red=""
+    local hosts=("$host")
+    [[ "$host" == "all" ]] && hosts=(pi5 pi5-speaker blackwell)
+    for h in "${hosts[@]}"; do
+        fleet_verify_one "$h" || { rc=1; red="$red $h"; }
+    done
+    # --notify: POST an ntfy/webhook alert when a topology-required service is
+    # red. Bounded by the caller's schedule (e.g. the systemd timer interval);
+    # re-alerts each run while red (no transition de-dup yet — see card).
+    if (( notify )) && [[ -n "$red" ]]; then
+        fleet_notify "$red"
     fi
-    fleet_verify_one "$host"
+    return $rc
+}
+
+# fleet_notify <red-hosts>: POST a fleet-red alert to $ADAMATON_ALERT_WEBHOOK
+# (set it in ~/.adamaton/ship.env). ntfy-compatible: the POST body is the
+# message; Title/Priority/Tags headers are honored by ntfy and harmless to a
+# generic webhook. No-op (with a warning) when the webhook URL is unset.
+fleet_notify() {
+    local red="$1" url="${ADAMATON_ALERT_WEBHOOK:-}"
+    if [[ -z "$url" ]]; then
+        echo "adam: --notify set but ADAMATON_ALERT_WEBHOOK is empty (add it to ~/.adamaton/ship.env); no alert sent" >&2
+        return 0
+    fi
+    local msg="Adamaton fleet RED:${red} — a topology-required service is down/unhealthy. Check: bin/adam fleet verify${red}"
+    if curl -fsS -m 10 \
+            -H "Title: Adamaton fleet alert" \
+            -H "Priority: high" \
+            -H "Tags: rotating_light" \
+            -d "$msg" "$url" >/dev/null 2>&1; then
+        echo "    alert posted to ADAMATON_ALERT_WEBHOOK (red:${red})"
+    else
+        echo "adam: warning: alert POST to ADAMATON_ALERT_WEBHOOK failed" >&2
+    fi
+    return 0
 }
 
 fleet_verify_one() {
