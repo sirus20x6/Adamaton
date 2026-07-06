@@ -53,6 +53,17 @@ Build + test + verify:
   build <host>              cross-compile + tag images for <host>
                             <host> = pi5 | pi5-speaker | blackwell
   test [--scope=<sub>]      run go test ./... across all (or one) sub-repo
+  ci <target> [ref]         local CI (GitHub Actions is banned — this IS the CI).
+                            <target> = a sub-repo name | cross | all.
+                            Sub-repo: vet+build+test every go module at <ref>
+                            (default origin/main) in a throwaway worktree;
+                            frontend runs pnpm install + vite build.
+                            cross: strict-parse + `compose config -q` every
+                            deploy/*/docker-compose.yml, caddy-validate the
+                            pi5 Caddyfile, schema-check every MANIFEST.yaml.
+                            all: every sub-repo + cross, aggregated (no
+                            fail-fast). Set ZTOK_PREFIX to include the
+                            libztok cgo modules (knowledge/r2g, reindex).
 
 Hooks + submodules:
   sync-hooks                copy hooks/ templates into each submodule's .git/hooks/
@@ -70,7 +81,11 @@ Fleet (multi-host rollouts):
                             (ntfy/webhook, set in ship.env) when red — see the
                             adamaton-fleet-verify.timer in deploy/systemd/.
   fleet pull <host|all>     ssh + docker compose pull + up -d, per host's MANIFEST
-  fleet promote <sha-or-tag>  bulk-update every host's MANIFEST to a new tag
+  fleet promote <sha-or-tag> [--dry-run]
+                            bulk-update every host's MANIFEST to a new tag.
+                            Validates each MANIFEST.yaml first (schema +
+                            services-vs-compose cross-check); --dry-run shows
+                            the would-be edits without touching any file.
 
 Single-host deploy:
   deploy <host>             run deploy/<host>/up.sh (rsync configs + compose up)
@@ -582,6 +597,393 @@ cmd_rescue() {
     echo "Run with --auto to do steps 1-2 automatically (you still need to cd + stash pop)."
 }
 
+# ---- ci: local CI runner ---------------------------------------------------
+# GitHub Actions is BANNED (operator decision 2026-07-06): no .github/workflows
+# files, no hosted runners, no registered self-hosted runners. `adam ci` is the
+# canonical CI — it runs the same gates locally, against a throwaway worktree
+# of the target at a chosen ref, so the canonical checkout is never touched.
+#
+# Env knobs:
+#   ZTOK_PREFIX  path to a built ztok prefix (include/ + lib/ with libztok).
+#                When unset, the cgo modules knowledge/r2g and knowledge/reindex
+#                are SKIPped (they cannot build without libztok). When set,
+#                they run with CGO_CFLAGS=-I$ZTOK_PREFIX/include and
+#                CGO_LDFLAGS=-L$ZTOK_PREFIX/lib.
+
+CI_RESULTS=()      # rows of "STATUS<TAB>target<TAB>step"
+CI_LOG_DIR=""      # per-run step logs (path printed at the end)
+
+# Go modules (as <sub-repo>/<dir>) that need libztok via cgo.
+CI_ZTOK_MODULES="knowledge/r2g knowledge/reindex"
+
+ci_record() {
+    local st="$1" tgt="$2" step="$3"
+    CI_RESULTS+=("$st"$'\t'"$tgt"$'\t'"$step")
+    local c="" r=""
+    if [[ -t 1 ]]; then
+        r=$'\033[0m'
+        case "$st" in
+            PASS) c=$'\033[32m' ;;
+            FAIL) c=$'\033[31m' ;;
+            *)    c=$'\033[33m' ;;
+        esac
+    fi
+    printf '  %s%-4s%s %s :: %s\n' "$c" "$st" "$r" "$tgt" "$step"
+}
+
+# ci_run_step <target> <step-label> <workdir> <cmd...>
+# Runs <cmd> in <workdir>, logging to CI_LOG_DIR; on failure prints the log
+# tail and records FAIL. Never aborts the whole run (caller aggregates).
+ci_run_step() {
+    local tgt="$1" step="$2" dir="$3"; shift 3
+    local log
+    log="$CI_LOG_DIR/$(echo "$tgt-$step" | tr -c 'A-Za-z0-9._-' '_').log"
+    if (cd "$dir" && "$@") >"$log" 2>&1; then
+        ci_record PASS "$tgt" "$step"
+        return 0
+    fi
+    ci_record FAIL "$tgt" "$step"
+    echo "  ---- tail of $log ----"
+    tail -n 40 "$log" | sed 's/^/  | /'
+    return 1
+}
+
+# ci_sub <sub-repo> [ref]: check out <ref> (default origin/main) of the
+# sub-repo in a TEMP git worktree under /tmp, inside a synthetic sibling
+# layout — every other sub-repo is a symlink to its canonical checkout — so
+# `replace ../../core`-style go.mod paths resolve without go.work.
+ci_sub() {
+    local repo="$1" ref="${2:-}"
+    local src="$ADAM_ROOT/$repo"
+    if [[ ! -e "$src/.git" ]]; then
+        ci_record SKIP "$repo" "submodule not initialized at $src"
+        return 0
+    fi
+    echo "==> ci: $repo"
+    git_in "$src" fetch origin --quiet 2>/dev/null || \
+        echo "adam: warning: git fetch failed for $repo (offline?); using local refs" >&2
+    [[ -z "$ref" ]] && ref="origin/main"
+    if ! git_in "$src" rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+        ci_record FAIL "$repo" "resolve ref '$ref'"
+        return 1
+    fi
+
+    local tmp tree
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/adam-ci-$repo.XXXXXX")"
+    tree="$tmp/tree"
+    mkdir -p "$tree"
+    local s
+    for s in "${SUBMODULES[@]}"; do
+        [[ "$s" == "$repo" ]] && continue
+        [[ -d "$ADAM_ROOT/$s" ]] && ln -s "$ADAM_ROOT/$s" "$tree/$s"
+    done
+    if ! git_in "$src" worktree add --detach --force "$tree/$repo" "$ref" >/dev/null 2>&1; then
+        ci_record FAIL "$repo" "git worktree add @ $ref"
+        rm -rf "$tmp"
+        return 1
+    fi
+    # Nested submodules (e.g. core/contracts/lib/forge-std) are not populated
+    # by `worktree add`; tests that shell out to them fail spuriously without
+    # this. Non-fatal: offline runs still get the go gates.
+    git_in "$tree/$repo" submodule update --init --recursive --depth 1 >/dev/null 2>&1 || \
+        echo "adam: warning: nested submodule init failed for $repo (offline?)" >&2
+    echo "    ref: $ref ($(git_in "$src" rev-parse --short "$ref")); tree: $tree/$repo"
+
+    local rc=0
+    if [[ "$repo" == "frontend" ]]; then
+        ci_frontend "$tree/$repo" || rc=1
+    else
+        ci_go_repo "$repo" "$tree/$repo" || rc=1
+    fi
+
+    git_in "$src" worktree remove --force "$tree/$repo" >/dev/null 2>&1 || true
+    git_in "$src" worktree prune >/dev/null 2>&1 || true
+    rm -rf "$tmp"
+    return $rc
+}
+
+# ci_go_repo <sub-repo> <tree-root>: vet + build + test every go.mod module.
+ci_go_repo() {
+    local repo="$1" root="$2"
+    local mods
+    mods="$(cd "$root" && find . -name go.mod \
+        -not -path '*/node_modules/*' -not -path '*-worktrees/*' \
+        -printf '%h\n' | sort)"
+    if [[ -z "$mods" ]]; then
+        ci_record SKIP "$repo" "no go modules"
+        return 0
+    fi
+    local rc=0 rel mod label moddir id
+    for rel in $mods; do
+        mod="${rel#./}"
+        label="${mod:-.}"
+        moddir="$root${mod:+/$mod}"
+        id="$repo${mod:+/$mod}"
+        case " $CI_ZTOK_MODULES " in
+            *" $id "*)
+                if [[ -z "${ZTOK_PREFIX:-}" ]]; then
+                    ci_record SKIP "$repo" "$label (needs libztok; set ZTOK_PREFIX to run)"
+                    continue
+                fi
+                ;;
+        esac
+        local -a envv=(GOWORK=off GOGENTS_SKIP_DOCKER_TESTS=1)
+        if [[ -n "${ZTOK_PREFIX:-}" ]]; then
+            envv+=("CGO_CFLAGS=-I$ZTOK_PREFIX/include" "CGO_LDFLAGS=-L$ZTOK_PREFIX/lib")
+        fi
+        ci_run_step "$repo" "$label go vet"   "$moddir" env "${envv[@]}" go vet ./...   || rc=1
+        ci_run_step "$repo" "$label go build" "$moddir" env "${envv[@]}" go build ./... || rc=1
+        ci_run_step "$repo" "$label go test"  "$moddir" env "${envv[@]}" go test ./...  || rc=1
+    done
+    return $rc
+}
+
+# ci_frontend <tree-root>: pnpm install (frozen once pnpm-lock.yaml is
+# committed — auto-detected) + vite prod build.
+ci_frontend() {
+    local root="$1" rc=0
+    if ! command -v pnpm >/dev/null 2>&1; then
+        ci_record SKIP frontend "pnpm not installed"
+        return 0
+    fi
+    if [[ -f "$root/pnpm-lock.yaml" ]]; then
+        ci_run_step frontend "pnpm install --frozen-lockfile" "$root" \
+            pnpm install --frozen-lockfile || rc=1
+    else
+        ci_run_step frontend "pnpm install (no pnpm-lock.yaml committed yet)" "$root" \
+            pnpm install || rc=1
+    fi
+    if [[ -x "$root/node_modules/.bin/vite" ]]; then
+        # pnpm v11's verify-deps can trip `pnpm <script>`; call vite directly.
+        ci_run_step frontend "vite build" "$root" ./node_modules/.bin/vite build || rc=1
+    else
+        ci_record FAIL frontend "vite build (node_modules/.bin/vite missing after install)"
+        rc=1
+    fi
+    return $rc
+}
+
+# ci_cross: validate the umbrella's deploy configs as checked out here.
+# Catches the exact class of bug that broke a pi5 deploy on 2026-07-06
+# (duplicate compose healthcheck key — invisible to yaml.safe_load, which
+# silently keeps the last duplicate; the strict parser rejects it).
+ci_cross() {
+    echo "==> ci: cross (umbrella deploy configs)"
+    local rc=0 f host
+    for f in "$DEPLOY_DIR"/*/docker-compose.yml; do
+        [[ -f "$f" ]] || continue
+        host="$(basename "$(dirname "$f")")"
+        ci_compose_yaml_strict "$host" "$f" || rc=1
+        ci_compose_config "$host" "$f" || rc=1
+    done
+    local caddyfile="$DEPLOY_DIR/pi5/Caddyfile"
+    if [[ -f "$caddyfile" ]]; then
+        if command -v docker >/dev/null 2>&1; then
+            ci_run_step cross "caddy validate (pi5/Caddyfile)" "$DEPLOY_DIR/pi5" \
+                docker run --rm -v "$DEPLOY_DIR/pi5:/w:ro" caddy:2-alpine \
+                caddy validate --adapter caddyfile --config /w/Caddyfile || rc=1
+        else
+            ci_record SKIP cross "caddy validate (docker not available)"
+        fi
+    fi
+    for f in "$DEPLOY_DIR"/*/MANIFEST.yaml; do
+        [[ -f "$f" ]] || continue
+        host="$(basename "$(dirname "$f")")"
+        if manifest_validate "$f"; then
+            ci_record PASS cross "MANIFEST.yaml schema ($host)"
+        else
+            ci_record FAIL cross "MANIFEST.yaml schema ($host)"
+            rc=1
+        fi
+    done
+    return $rc
+}
+
+# Strict YAML parse: rejects duplicate mapping keys anywhere in the file
+# (yaml.safe_load and docker compose both silently last-write-wins them).
+ci_compose_yaml_strict() {
+    local host="$1" f="$2" out
+    if out="$(python3 - "$f" <<'PYEOF' 2>&1
+import sys, yaml
+
+class StrictLoader(yaml.SafeLoader):
+    pass
+
+def _mapping(loader, node, deep=False):
+    seen = {}
+    for k_node, _ in node.value:
+        key = loader.construct_object(k_node, deep=deep)
+        if key in seen:
+            raise yaml.YAMLError(
+                "duplicate key %r (lines %d and %d)"
+                % (key, seen[key], k_node.start_mark.line + 1))
+        seen[key] = k_node.start_mark.line + 1
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
+
+with open(sys.argv[1]) as fh:
+    yaml.load(fh, Loader=StrictLoader)
+PYEOF
+)"; then
+        ci_record PASS cross "yaml strict-parse ($host/docker-compose.yml)"
+        return 0
+    fi
+    ci_record FAIL cross "yaml strict-parse ($host/docker-compose.yml)"
+    echo "$out" | sed 's/^/  | /'
+    return 1
+}
+
+# Full compose validation via `docker compose config -q`, run from a temp
+# copy with stub .env / image-tags.env and stub values for every ${VAR} that
+# has no default — so the file must interpolate + validate without the
+# host's real secrets.
+ci_compose_config() {
+    local host="$1" f="$2"
+    if ! command -v docker >/dev/null 2>&1; then
+        ci_record SKIP cross "compose config -q ($host) — docker not available"
+        return 0
+    fi
+    local tmp v out
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/adam-ci-compose.XXXXXX")"
+    cp "$f" "$tmp/docker-compose.yml"
+    touch "$tmp/.env" "$tmp/image-tags.env"
+    # Vars written as ${VAR}, ${VAR?...} or ${VAR:?...} have no default and
+    # must be stubbed; anything with :- keeps its in-file default.
+    while read -r v; do
+        [[ -z "$v" ]] && continue
+        case "$v" in
+            *IP*|*HOST*) echo "$v=127.0.0.1" ;;
+            *)           echo "$v=ci-stub" ;;
+        esac
+    done < <(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*(\}|:?\?)' "$f" \
+             | sed -E 's/^\$\{//; s/[:?}]+$//' | sort -u) > "$tmp/ci-stub.env"
+    if out="$(docker compose --project-name adam-ci --env-file "$tmp/ci-stub.env" \
+              --project-directory "$tmp" -f "$tmp/docker-compose.yml" config -q 2>&1)"; then
+        ci_record PASS cross "compose config -q ($host)"
+        rm -rf "$tmp"
+        return 0
+    fi
+    ci_record FAIL cross "compose config -q ($host)"
+    echo "$out" | sed 's/^/  | /'
+    rm -rf "$tmp"
+    return 1
+}
+
+# manifest_validate <MANIFEST.yaml>: schema-check a host manifest and
+# cross-check its service allow-list against the sibling docker-compose.yml.
+# Schema problems → return 1. Services listed in the MANIFEST but absent
+# from compose are a WARNING only: pi5 intentionally keeps retired workers
+# allow-listed through their rollback window.
+manifest_validate() {
+    local m="$1"
+    python3 - "$m" "$(dirname "$m")/docker-compose.yml" <<'PYEOF'
+import os, sys, yaml
+mpath, cpath = sys.argv[1], sys.argv[2]
+errs, warns = [], []
+try:
+    m = yaml.safe_load(open(mpath))
+except yaml.YAMLError as e:
+    print("  ERROR %s: YAML parse error: %s" % (mpath, e), file=sys.stderr)
+    sys.exit(1)
+if not isinstance(m, dict):
+    print("  ERROR %s: top level must be a mapping" % mpath, file=sys.stderr)
+    sys.exit(1)
+
+host = m.get("host")
+if not isinstance(host, str) or not host:
+    errs.append("missing/invalid 'host' (non-empty string required)")
+else:
+    dirname = os.path.basename(os.path.dirname(os.path.abspath(mpath)))
+    if host != dirname:
+        errs.append("'host: %s' does not match directory '%s'" % (host, dirname))
+
+tag = m.get("image_tag")
+if not isinstance(tag, str) or not tag.strip():
+    errs.append("missing/invalid 'image_tag' (non-empty string required)")
+
+svcs = m.get("services")
+if not isinstance(svcs, list) or not svcs or \
+        not all(isinstance(s, str) and s for s in svcs):
+    errs.append("missing/invalid 'services' (non-empty list of strings required)")
+else:
+    dupes = sorted({s for s in svcs if svcs.count(s) > 1})
+    if dupes:
+        errs.append("duplicate services: " + ", ".join(dupes))
+    if os.path.exists(cpath):
+        try:
+            comp = yaml.safe_load(open(cpath)) or {}
+            comp_svcs = set((comp.get("services") or {}).keys())
+            missing = sorted(set(svcs) - comp_svcs)
+            if missing:
+                warns.append("services in MANIFEST but not in docker-compose.yml "
+                             "(ok if retained for a rollback window): "
+                             + ", ".join(missing))
+        except yaml.YAMLError as e:
+            warns.append("could not cross-check compose file: %s" % e)
+    else:
+        warns.append("no docker-compose.yml beside MANIFEST; service cross-check skipped")
+
+for w in warns:
+    print("  WARN  %s: %s" % (mpath, w), file=sys.stderr)
+for e in errs:
+    print("  ERROR %s: %s" % (mpath, e), file=sys.stderr)
+sys.exit(1 if errs else 0)
+PYEOF
+}
+
+ci_summary() {
+    echo
+    echo "==> ci summary"
+    printf '  %-6s %-12s %s\n' RESULT TARGET STEP
+    printf '  %-6s %-12s %s\n' ------ ------------ ----
+    local row st tgt step fails=0 passes=0 skips=0
+    for row in "${CI_RESULTS[@]}"; do
+        IFS=$'\t' read -r st tgt step <<< "$row"
+        printf '  %-6s %-12s %s\n' "$st" "$tgt" "$step"
+        case "$st" in
+            FAIL) fails=$((fails+1)) ;;
+            PASS) passes=$((passes+1)) ;;
+            *)    skips=$((skips+1)) ;;
+        esac
+    done
+    echo
+    echo "  totals: $passes pass, $fails fail, $skips skip"
+    echo "  step logs: $CI_LOG_DIR"
+    [[ "$fails" -eq 0 ]]
+}
+
+cmd_ci() {
+    [[ $# -ge 1 ]] || die "ci: usage: adam ci <target> [ref]   (target = ${SUBMODULES[*]} | cross | all)"
+    local target="$1" ref="${2:-}"
+    command -v python3 >/dev/null 2>&1 || die "ci: python3 (with PyYAML) is required"
+    CI_RESULTS=()
+    CI_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/adam-ci-logs.XXXXXX")"
+    local rc=0 s
+    case "$target" in
+        all)
+            [[ -n "$ref" ]] && die "ci all: [ref] not supported (each target uses its own origin/main)"
+            for s in "${SUBMODULES[@]}"; do
+                ci_sub "$s" "" || rc=1      # no fail-fast: run everything, aggregate
+            done
+            ci_cross || rc=1
+            ;;
+        cross)
+            [[ -n "$ref" ]] && die "ci cross: [ref] not supported; validates the current umbrella checkout"
+            ci_cross || rc=1
+            ;;
+        *)
+            local ok=0
+            for s in "${SUBMODULES[@]}"; do [[ "$s" == "$target" ]] && ok=1; done
+            [[ "$ok" -eq 1 ]] || die "ci: unknown target '$target' (valid: ${SUBMODULES[*]} cross all)"
+            ci_sub "$target" "$ref" || rc=1
+            ;;
+    esac
+    ci_summary || rc=1
+    return $rc
+}
+
 # ---- fleet: multi-host pull/promote/status -------------------------------
 
 cmd_fleet() {
@@ -786,15 +1188,46 @@ fleet_pull_one() {
     ssh "$host" "cd ~/Adamaton-deploy && IMAGE_TAG=$tag docker compose pull && IMAGE_TAG=$tag docker compose up -d && docker compose ps"
 }
 
+# fleet promote <sha-or-tag> [--dry-run]: bulk-retag every host MANIFEST.
+# Each MANIFEST is validated first (schema + services-vs-compose cross-check
+# via manifest_validate); a schema error on ANY host aborts before any file
+# is touched. --dry-run prints the would-be edits and changes nothing.
 fleet_promote() {
-    local tag="${1:-}"
-    [[ -z "$tag" ]] && die "fleet promote: missing <sha-or-tag>"
+    local tag="" dry=0 a
+    for a in "$@"; do
+        case "$a" in
+            --dry-run) dry=1 ;;
+            -*) die "fleet promote: unknown flag '$a'" ;;
+            *) tag="$a" ;;
+        esac
+    done
+    [[ -z "$tag" ]] && die "fleet promote: usage: adam fleet promote <sha-or-tag> [--dry-run]"
+
+    # Validate every MANIFEST before mutating any of them.
+    local host m bad=0
     for host in pi5 pi5-speaker blackwell; do
-        local m="$DEPLOY_DIR/$host/MANIFEST.yaml"
+        m="$DEPLOY_DIR/$host/MANIFEST.yaml"
         [[ -f "$m" ]] || continue
+        manifest_validate "$m" || bad=1
+    done
+    [[ "$bad" -ne 0 ]] && die "fleet promote: MANIFEST validation failed; fix the errors above before promoting"
+
+    for host in pi5 pi5-speaker blackwell; do
+        m="$DEPLOY_DIR/$host/MANIFEST.yaml"
+        [[ -f "$m" ]] || continue
+        local cur
+        cur="$(grep -E '^image_tag:' "$m" | head -1 | sed -E 's/^image_tag:[[:space:]]*//')"
+        if (( dry )); then
+            echo "  dry-run: $host: image_tag $cur -> \"$tag\""
+            continue
+        fi
         sed -i -E "s|^image_tag:.*|image_tag: \"$tag\"|" "$m"
         git_in "$ADAM_ROOT" add "$m"
     done
+    if (( dry )); then
+        echo "  dry-run: no files changed, no commit made"
+        return 0
+    fi
     ADAM_BUMP=1 git_in "$ADAM_ROOT" commit -m "fleet: promote to $tag" || \
         echo "adam: no manifest change (already at $tag)"
 }
@@ -1463,6 +1896,7 @@ case "$1" in
     doctor)     shift; cmd_doctor "$@" ;;
     build)      shift; cmd_build "$@" ;;
     test)       shift; cmd_test "$@" ;;
+    ci)         shift; cmd_ci "$@" ;;
     clean)      shift; cmd_clean "$@" ;;
     rescue)     shift; cmd_rescue "$@" ;;
     fleet)      shift; cmd_fleet "$@" ;;

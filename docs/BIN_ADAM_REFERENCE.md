@@ -166,6 +166,63 @@ bin/adam test
 bin/adam test --scope=delegator
 ```
 
+### `ci <target> [ref]`
+
+Local CI runner. **GitHub Actions is banned** (operator decision 2026-07-06):
+no `.github/workflows` files, no hosted or self-hosted runners. `bin/adam ci`
+is the canonical CI gate — run it before merging and after bumping.
+
+**target** = one of `core` | `frontend` | `knowledge` | `deepresearch` |
+`platform` | `delegator` | `evolve` | `loopvm` | `cross` | `all`.
+
+```bash
+bin/adam ci core                    # gate core @ origin/main
+bin/adam ci platform sirus20x6/foo  # gate a feature branch before merge
+bin/adam ci cross                   # validate umbrella deploy configs
+bin/adam ci all                     # everything, aggregated (no fail-fast)
+```
+
+**Sub-repo targets** check out `[ref]` (default: the sub-repo's `origin/main`,
+after a fetch) into a **throwaway git worktree under `/tmp`** — the canonical
+checkout is never touched. The worktree sits inside a synthetic sibling layout
+where every *other* sub-repo is a symlink to its canonical checkout, so
+`replace ../../core`-style `go.mod` paths resolve without `go.work`
+(`GOWORK=off` is forced). Nested submodules (e.g. `core/contracts/lib/*`) are
+initialized in the temp worktree so contract-backed tests work.
+
+For every `go.mod` module found, three steps run: `go vet ./...`,
+`go build ./...`, and `GOGENTS_SKIP_DOCKER_TESTS=1 go test ./...`.
+
+The cgo modules `knowledge/r2g` and `knowledge/reindex` need `libztok` and are
+**SKIPped by default**. Set `ZTOK_PREFIX=/path/to/ztok/prefix` (a prefix with
+`include/` + `lib/` — see `docs/LOCAL_DEV.md`) to include them; the CGO
+`-I`/`-L` flags are derived from it.
+
+**`frontend`** runs `pnpm install` (automatically `--frozen-lockfile` once a
+`pnpm-lock.yaml` is committed) followed by `./node_modules/.bin/vite build`.
+
+**`cross`** validates the umbrella's deploy configuration as checked out:
+
+- strict YAML parse of every `deploy/*/docker-compose.yml` — **rejects
+  duplicate mapping keys**, which both `yaml.safe_load` and docker compose
+  silently last-write-wins (a duplicate `healthcheck:` key broke a pi5 deploy
+  on 2026-07-06);
+- `docker compose config -q` on each compose file, from a temp copy with stub
+  `.env`/`image-tags.env` and stub values for every `${VAR}` that lacks a
+  default — full interpolation + schema validation without real secrets;
+- `caddy validate` (via the `caddy:2-alpine` image) on `deploy/pi5/Caddyfile`;
+- schema check of every `deploy/*/MANIFEST.yaml` (same validator `fleet
+  promote` uses): `host` matches its directory, non-empty `image_tag`,
+  non-empty string `services` list, no duplicates; services listed in the
+  MANIFEST but absent from compose are a **warning** only (pi5 keeps retired
+  workers allow-listed through rollback windows).
+
+**`all`** runs every sub-repo plus `cross` with fail-fast off, aggregating
+results. `[ref]` is not accepted with `all` or `cross`.
+
+Every run ends with a `PASS`/`FAIL`/`SKIP` summary table and the path to
+per-step logs; exit status is non-zero if any step failed.
+
 ---
 
 ## Single-host deploy
@@ -265,13 +322,25 @@ bin/adam fleet pull pi5
 bin/adam fleet pull all
 ```
 
-### `fleet promote <sha-or-tag>`
+### `fleet promote <sha-or-tag> [--dry-run]`
 
 Updates every `deploy/*/MANIFEST.yaml` `image_tag` field to the given tag and
 commits the changes to umbrella `main` via `ADAM_BUMP=1`.
 
+Before mutating anything, every MANIFEST is validated (same validator as
+`bin/adam ci cross`): schema sanity (`host` matches directory, non-empty
+`image_tag`, non-empty string `services` list, no duplicates) plus a
+cross-check that each listed service exists in the host's
+`docker-compose.yml` (missing services warn — pi5 intentionally keeps retired
+workers allow-listed during rollback windows). A schema error on **any** host
+aborts the promote before any file is touched.
+
+`--dry-run` prints the would-be `image_tag` change per host and exits without
+modifying files or committing.
+
 ```bash
-bin/adam fleet promote sha-abc1234
+bin/adam fleet promote sha-abc1234 --dry-run   # preview
+bin/adam fleet promote sha-abc1234             # validate + edit + commit
 ```
 
 ---
@@ -292,6 +361,7 @@ bin/adam fleet promote sha-abc1234
 | `pull` | Pull umbrella + all submodules |
 | `build <host>` | Print cross-compile instructions for a host |
 | `test [--scope=<sub>]` | Run go test across sub-repos (no docker) |
+| `ci <target> [ref]` | Local CI: vet/build/test a sub-repo at a ref, validate deploy configs (`cross`), or both (`all`) |
 | `deploy <host>` | Run `deploy/<host>/up.sh` |
 | `ship <host> <svc...>` | Build + push image(s) + restart via deploy-agent |
 | `ship-self <host>` | Build + push deploy-agent image; restart via ssh |
@@ -299,4 +369,4 @@ bin/adam fleet promote sha-abc1234
 | `bootstrap <host>` | One-shot deploy-agent first install on a fresh host |
 | `fleet status` | Show image_tag per host |
 | `fleet pull <host\|all>` | SSH + compose pull + up on fleet host(s) |
-| `fleet promote <tag>` | Bulk-update MANIFEST.yaml image_tag |
+| `fleet promote <tag> [--dry-run]` | Validate + bulk-update MANIFEST.yaml image_tag |

@@ -64,6 +64,63 @@ bin/adam deploy workstation
 # does not start any worker containers — run `go run ./cmd/<worker>` from each submodule for foreground dev
 ```
 
+## Pre-deploy schema-migration coordination
+
+Not every service migrates the shared Postgres schema, and the ones that do
+migrate different slices of it. Getting the **order** wrong means a service
+boots against tables/columns that don't exist yet.
+
+Who migrates what:
+
+- **evolve store** (`evolve/evolve/store`, embedded `migrations/*.sql`,
+  migration table `schema_migrations_evo`): runs automatically inside
+  `store.Open` — i.e. **on worker boot**. Anything that opens the store
+  migrates: `adamaton-worker` (via its evo registration), `evo-worker`,
+  `evo-cli`. This is the schema the apiserver/`evo-api` *reads*
+  (`evo.tasks`, kanban, workers, jobs, …).
+- **apiserver / evo-api** (`platform/dashboard/apiserver`): does **NOT**
+  migrate the evo schema. At boot it only runs its *own* namespaced
+  migrations (`schema_migrations_experiments`, `schema_migrations_datasets`),
+  and those are **best-effort** — a failure logs a warning and the server
+  keeps serving anyway.
+
+Consequence: when a release includes evolve-store schema changes, the
+**worker must boot (and finish migrating) before the apiserver serves
+traffic** that touches the new tables. Compose `depends_on` does not order
+this — the apiserver has no dependency on the worker.
+
+Pre-flight for any deploy that includes evo schema changes:
+
+```bash
+# 1. Roll the worker first and let it migrate on boot:
+ssh pi5 'cd ~/Adamaton-deploy && docker compose up -d adamaton-worker'
+ssh pi5 'cd ~/Adamaton-deploy && docker compose logs --tail 50 adamaton-worker'
+#    (confirm a clean boot / migration lines, no crash-loop)
+
+# 2. Verify the schema version landed:
+ssh pi5 "docker exec \$(docker ps -qf name=postgres) \
+  psql -U gogents -c 'select * from schema_migrations_evo'"
+
+# 3. Only then roll the apiserver:
+ssh pi5 'cd ~/Adamaton-deploy && docker compose up -d evo-api'
+```
+
+One-shot alternative (no worker restart wanted): run any store-opening binary
+against the same DSN — e.g. `evo-cli` — since `store.Open` migrates
+unconditionally; a `docker compose run --rm` of the worker image with a
+command that opens the store and exits does the same.
+
+Rules of thumb:
+
+- **Additive-only migrations** (new tables, nullable columns): the ordering
+  above is sufficient; the old apiserver keeps working mid-roll.
+- **Destructive/renaming migrations**: don't, in one release. Split into
+  add → deploy → backfill → drop across two releases, so no running binary
+  ever sees a schema it doesn't understand.
+- **Rollback**: nothing runs the `.down.sql` files automatically —
+  `bin/adam deploy --rollback` rolls binaries, not schema. Rolling a binary
+  back past a schema bump is only safe if the bump was additive.
+
 ## Rollback
 
 Every umbrella commit is a deploy ref. To revert pi5 to a known-good state:
