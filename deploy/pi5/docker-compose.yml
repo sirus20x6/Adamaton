@@ -404,13 +404,6 @@ services:
         condition: service_started
     volumes:
       - nano_workspace:/var/lib/nano-research
-    # The Dockerfile's HEALTHCHECK probes http://localhost:7378/healthz,
-    # which is the nano-research HTTP server entrypoint. The worker
-    # variant has no HTTP listener — Temporal sees liveness via the
-    # worker's polling heartbeat, not an HTTP endpoint. Disable so the
-    # container doesn't perpetually report `(unhealthy)`.
-    healthcheck:
-      disable: true
     restart: unless-stopped
 
   figure-renderer:
