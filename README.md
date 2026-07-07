@@ -82,6 +82,40 @@ Worktree-based agent coordination (`claim`/`release`/`status`), a local CI gate
 push-deploy across pi5 / pi5-speaker / blackwell / workstation with fleet-verify
 and self-hosted alerting.
 
+## Screenshots
+
+**Autonomous deep research — the 9-stage NanoResearch pipeline**, with a live
+stage timeline (ideation → planning → coding → execution → analysis → writing →
+review), per-stage model + timing, and captured artifacts/traces.
+
+![Deep research pipeline](docs/screenshots/deep-research-pipeline.png)
+
+**Fleet console — live hardware telemetry** across the cluster (server + Raspberry
+Pi racks), with per-node CPU/RAM meters, compute/bandwidth, and online status.
+
+![Fleet nodes](docs/screenshots/fleet-nodes.png)
+
+**Evolutionary self-improvement** — MAP-Elites runs over KernelBench tasks,
+candidate programs per generation, and insights distilled from prior wins.
+
+![Evolution](docs/screenshots/evolution.png)
+
+**Hierarchical memory (H-Mem)** — a unified view over agent memories and the
+deepresearch knowledge graph (tens of thousands of entities + relationships),
+grouped by source.
+
+![Memory](docs/screenshots/memory.png)
+
+**SkillRAE skills** — reusable procedural skills as a multi-level graph
+(skill ⊂ community, skill ← subunit) with cosine + cross-encoder retrieval.
+
+![SkillRAE skills](docs/screenshots/skills-rae.png)
+
+**Unified suite dashboard** — multi-agent delegation token/usage stats, recent
+tasks, and workflow status at a glance.
+
+![Suite dashboard](docs/screenshots/suite-dashboard.png)
+
 ## Quickstart
 
 ```bash
