@@ -84,8 +84,15 @@ and self-hosted alerting.
 
 ## Screenshots
 
-**Autonomous deep research — the 9-stage NanoResearch pipeline**, with a live
-stage timeline (ideation → planning → coding → execution → analysis → writing →
+**Deep research — compose a question**, pick your sources (arXiv, GitHub,
+OpenAlex, SearXNG, Semantic Scholar, StackExchange, Wikipedia) and a depth
+(quick → exhaustive); the platform fans out, indexes the haul, builds a
+knowledge graph, and curates a cited synthesis.
+
+![Deep research composer](docs/screenshots/deep-search.png)
+
+**…then watch it run — the 9-stage NanoResearch pipeline**, with a live stage
+timeline (ideation → planning → coding → execution → analysis → writing →
 review), per-stage model + timing, and captured artifacts/traces.
 
 ![Deep research pipeline](docs/screenshots/deep-research-pipeline.png)
@@ -122,6 +129,24 @@ grouped by source.
 tasks, and workflow status at a glance.
 
 ![Suite dashboard](docs/screenshots/suite-dashboard.png)
+
+**Source plugins** — 15 registered adapters (arXiv, Semantic Scholar, GitHub,
+SearXNG, Tavily, Jina, Hugging Face Papers, …) that pull external data into the
+ingestion pipeline, each advertising its own args schema.
+
+![Source plugins](docs/screenshots/plugins.png)
+
+**Workflow connectors** — 114 built-in workflow nodes (PR-review agents,
+accessibility checks, actions) loaded from the plugin catalog, with n8n import
+support.
+
+![Workflow connectors](docs/screenshots/connectors.png)
+
+**Zotero integration** — sync a reference library (1,122 items here) into a
+corpus via the Zotero Web API, deduplicated by DOI / arXiv id / title hash, with
+per-item ingest status.
+
+![Zotero integration](docs/screenshots/zotero.png)
 
 ## Quickstart
 
