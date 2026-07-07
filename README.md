@@ -33,15 +33,21 @@ query refinement → evidence synthesis → cited long-form artifacts → distil
 candidates. Pluggable search strategies (dual-confidence, evidence-based,
 iterative-refinement, IterDRAG, parallel-constrained). Sources: web (SearXNG),
 arXiv full-text (PDF → LaTeX → text), DOI/URL ingest, and government-statistics
-adapters. Streams progress over SSE; runs as a Temporal workflow.
+adapters. Streams progress over SSE; runs as a Temporal workflow. Implements the
+NanoResearch pipeline; feeds a self-distillation loop that mines training
+candidates from completed research.
 
 ### Retrieval & knowledge — `knowledge`
 - **r2g** — hybrid RAG: lexical (BM25) + dense (BGE-M3 / Octen) retrieval fused
   with Reciprocal Rank Fusion, a cross-encoder reranking pass, optional
   graph-vote retrieval (TGS-RAG), and a native graph-relationships endpoint.
-- **skills-rae** — two-stage skill-memory retrieval (BM25 bottom-up + community
-  top-down over BGE-M3 embeddings), compiled into token-budgeted context and
-  served over MCP for agents.
+- **skills-rae** — the SkillRAE method: skill-based context compilation for
+  retrieval-augmented execution. Two-stage retrieval (BM25 bottom-up + community
+  top-down over BGE-M3 embeddings) compiled into a token-budgeted context block
+  and served over MCP for agents.
+- **H-Mem** — hierarchical memory over the corpus: episodic capture plus
+  recursive rollup summary trees, so retrieval can draw on condensed higher-level
+  abstractions instead of only leaf chunks.
 - Zig-accelerated tokenization (`ztok`, byte-identical cl100k, ~5.7× faster),
   reindex pipeline, and figure rendering.
 
@@ -100,9 +106,23 @@ No cycles. See `docs/ARCHITECTURE.md` for component details.
 
 ## References
 
-Prior art the features are built on. TGS-RAG is cited directly in the codebase
-(`knowledge/bench/`); the rest are the established techniques and standards the
-implementations follow.
+Prior art the features are built on. Several are cited directly in the codebase
+(SkillRAE, NanoResearch, TGS-RAG, H-Mem, the self-distillation loop); the rest
+are the established techniques and standards the implementations follow.
+
+**Deep research & distillation**
+- NanoResearch — the multi-stage autonomous research pipeline.
+  [arXiv:2605.10813](https://arxiv.org/abs/2605.10813) (with OpenRaiser/NanoResearch).
+- Self-distillation — mining training candidates from completed research runs.
+  [arXiv:2603.12273](https://arxiv.org/abs/2603.12273)
+
+**Skills & memory**
+- SkillRAE — Meng, Wang & Fang, *SkillRAE: Agent Skill-Based Context Compilation
+  for Retrieval-Augmented Execution*, 2026.
+  [arXiv:2605.10114](https://arxiv.org/abs/2605.10114) (drives `skills-rae` + the
+  SkillRAE MCP).
+- H-Mem — hierarchical memory (episodic capture + recursive rollup summary
+  trees), referenced in `knowledge/r2g` as the memory-subsystem design.
 
 **Retrieval & RAG**
 - BGE-M3 embeddings — Chen et al., *BGE M3-Embedding: Multi-Lingual,
