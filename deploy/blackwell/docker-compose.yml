@@ -79,7 +79,7 @@ services:
     hostname: ${WORKER_HOSTNAME:-workstation}
     env_file: [.env, image-tags.env]
     environment:
-      WORKER_QUEUES: evo
+      WORKER_QUEUES: evo,experiments
       EVO_TASK_QUEUE: ${EVO_KERNEL_TASK_QUEUE:-evo-kernel}
       TEMPORAL_ADDRESS: ${PI1_HOST:-10.0.4.30}:7233
       TEMPORAL_NAMESPACE: default
