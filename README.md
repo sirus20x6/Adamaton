@@ -45,9 +45,9 @@ candidates from completed research.
   retrieval-augmented execution. Two-stage retrieval (BM25 bottom-up + community
   top-down over BGE-M3 embeddings) compiled into a token-budgeted context block
   and served over MCP for agents.
-- **H-Mem** — hierarchical memory over the corpus: episodic capture plus
-  recursive rollup summary trees, so retrieval can draw on condensed higher-level
-  abstractions instead of only leaf chunks.
+- **H-Mem** — hierarchical agent memory over a hybrid structure: recursive
+  rollup summary trees (condensed higher-level abstractions, not just leaf
+  chunks) paired with a knowledge graph of entity relationships.
 - Zig-accelerated tokenization (`ztok`, byte-identical cl100k, ~5.7× faster),
   reindex pipeline, and figure rendering.
 
@@ -121,8 +121,14 @@ are the established techniques and standards the implementations follow.
   for Retrieval-Augmented Execution*, 2026.
   [arXiv:2605.10114](https://arxiv.org/abs/2605.10114) (drives `skills-rae` + the
   SkillRAE MCP).
-- H-Mem — hierarchical memory (episodic capture + recursive rollup summary
-  trees), referenced in `knowledge/r2g` as the memory-subsystem design.
+- H-Mem — Yu, Fang, Liu & Ma, *H-Mem: A Novel Memory Mechanism for Evolving and
+  Retrieving Agent Memory via a Hybrid Structure*, 2026.
+  [arXiv:2605.15701](https://arxiv.org/abs/2605.15701) (the hybrid tree +
+  knowledge-graph memory in `knowledge/r2g`).
+- RAPTOR — Sarthi et al., *RAPTOR: Recursive Abstractive Processing for
+  Tree-Organized Retrieval*, ICLR 2024.
+  [arXiv:2401.18059](https://arxiv.org/abs/2401.18059) (the recursive rollup
+  summary-tree pattern the H-Mem implementation builds on).
 
 **Retrieval & RAG**
 - BGE-M3 embeddings — Chen et al., *BGE M3-Embedding: Multi-Lingual,
