@@ -272,7 +272,7 @@ services:
     image: ${WORKSTATION_IP:-10.0.4.37}:5000/adamaton-worker-full:${ADAMATON_WORKER_TAG:-main}
     env_file: [.env, image-tags.env]
     environment:
-      WORKER_QUEUES: skills,reindex-ingest,reindex-extract,dispatch,evo
+      WORKER_QUEUES: skills,reindex-ingest,reindex-extract,dispatch,evo,experiments
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       # Skills + dispatch + evo land on the evo Postgres (5432).
