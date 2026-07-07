@@ -90,6 +90,13 @@ review), per-stage model + timing, and captured artifacts/traces.
 
 ![Deep research pipeline](docs/screenshots/deep-research-pipeline.png)
 
+**Agent orchestration — Adamaton's own Kanban board.** Much of Adamaton was
+built by AI agents working this board: each claims a card, writes the code,
+opens a PR, merges it green, and deploys it to the fleet (note the linked PRs on
+every Done card).
+
+![Agent Kanban board](docs/screenshots/agent-kanban.png)
+
 **Fleet console — live hardware telemetry** across the cluster (server + Raspberry
 Pi racks), with per-node CPU/RAM meters, compute/bandwidth, and online status.
 
